@@ -28,6 +28,8 @@ export class Wait extends Error {
 class Park extends Error {}
 
 const TRIES = 2;
+/** Writing a fair hidden test is harder than it looks; the author gets one more try (runs 0822c289, da199015). */
+const TEST_TRIES = 3;
 
 export class Engine {
   readonly limits: Limits = {};
@@ -101,8 +103,8 @@ export class Engine {
 
   private async writeTest(row: CardRow, plugin: Plugin): Promise<void> {
     const testFile = this.testPath(row, plugin);
-    let feedback: string | undefined;
-    for (let attempt = 1; attempt <= TRIES; attempt++) {
+    const feedback: string[] = [];
+    for (let attempt = 1; attempt <= TEST_TRIES; attempt++) {
       const builderFamily = this.choose(row.id, "builder").family;
       const author = this.choose(row.id, "testAuthor", builderFamily);
       const { sha } = baseOf(row.project, plugin.mainBranch);
@@ -115,12 +117,12 @@ export class Engine {
         if (result.limitUntil) { attempt--; continue; }
         const changed = changedPaths(copy, sha);
         if (!result.ok || changed.length !== 1 || changed[0] !== testFile) {
-          feedback = `Write only ${testFile}; you changed: ${changed.join(", ") || "nothing"}.`;
+          feedback.push(`Write only ${testFile}; you changed: ${changed.join(", ") || "nothing"}.`);
           continue;
         }
         const source = readFileSync(join(copy, testFile), "utf8");
         const red = await this.runAcceptance(row, plugin, row.project, sha, source, testFile, `red-${attempt}`);
-        if (red.ok) { feedback = "The test passes on the current code, so it does not check the new feature."; continue; }
+        if (red.ok) { feedback.push("The test passes on the current code, so it does not check the new feature."); continue; }
         const checker = this.choose(row.id, "cardCheck", author.family);
         const check = await this.ask(row.id, "cardCheck", checker, {
           cwd: copy, write: false, minutes: 10, schema: jobs.CARD_CHECK_SCHEMA,
@@ -128,8 +130,8 @@ export class Engine {
         });
         if (check.limitUntil) { attempt--; continue; }
         const verdict = check.json as { matches: boolean; problems: string[] } | undefined;
-        if (!check.ok || !verdict) { feedback = "The test could not be checked against the card."; continue; }
-        if (!verdict.matches) { feedback = verdict.problems.join(" "); continue; }
+        if (!check.ok || !verdict) { feedback.push("The test could not be checked against the card."); continue; }
+        if (!verdict.matches) { feedback.push(verdict.problems.join(" ")); continue; }
         const store = this.cardDir(row.id, "test");
         writeFileSync(join(store, "test.src"), source);
         this.deps.store.event(row.id, "test.ready", { testFile, author: author.id, hash: sha256(source) });
@@ -139,7 +141,7 @@ export class Engine {
         removeCopy(copy);
       }
     }
-    throw new Park(`Peeraxis could not write a fair test for this card: ${feedback}`);
+    throw new Park(`Peeraxis could not write a fair test for this card: ${feedback.at(-1)}`);
   }
 
   private hiddenTest(row: CardRow): { source: string; testFile: string; author: string } {

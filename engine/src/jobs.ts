@@ -15,7 +15,7 @@ export function cardText(card: Card): string {
   ].join("\n");
 }
 
-export function testAuthorPrompt(card: Card, testFile: string, example: string | undefined, feedback: string | undefined, notes?: string): string {
+export function testAuthorPrompt(card: Card, testFile: string, example: string | undefined, feedback: string[], notes?: string): string {
   return [
     "You write the acceptance test for one feature card in this project. Another agent will build the",
     "feature later without ever seeing your test, so the test must describe the behaviour from the",
@@ -36,11 +36,22 @@ export function testAuthorPrompt(card: Card, testFile: string, example: string |
     "- Any implementation a reasonable person would accept from this card must pass the test.",
     ...(example ? [`- Follow the structure and helpers of the existing test ${example}.`] : []),
     ...(notes ? ["", "How acceptance tests run in this project:", notes] : []),
-    ...(feedback ? ["", "Your previous test was rejected for this reason; fix it:", feedback] : []),
+    "",
+    "An independent reviewer will reject the test unless:",
+    ...FAIR_TEST_RULES,
+    ...(feedback.length ? ["", "Earlier versions of your test were rejected for these reasons; avoid all of them:", ...feedback.map((f) => `- ${f}`)] : []),
     "",
     "When done, reply with one sentence saying what the test checks.",
   ].join("\n");
 }
+
+/** What makes a hidden test fair. The test author writes to these and the card check judges by them. */
+export const FAIR_TEST_RULES = [
+  "- every watched step has a test step, in order, that checks what that step promises, about the thing it names",
+  "  (e.g. a label is checked on the named feature's own row, not anywhere on the page);",
+  "- it checks nothing the card does not promise, and nothing under Not included;",
+  "- a correct implementation of the card could pass it, however it is reasonably built, and an empty one could not.",
+];
 
 export const CARD_CHECK_SCHEMA = {
   type: "object",
@@ -55,9 +66,7 @@ export const CARD_CHECK_SCHEMA = {
 export function cardCheckPrompt(card: Card, testSource: string): string {
   return [
     "Check whether this acceptance test matches the approved feature card. It matches when:",
-    "- every watched step has a test step, in order, that checks what that step promises;",
-    "- it checks nothing the card does not promise, and nothing under Not included;",
-    "- a correct implementation of the card could pass it, and an empty implementation could not.",
+    ...FAIR_TEST_RULES,
     "List each concrete problem in one plain sentence. No style comments.",
     "",
     cardText(card),
