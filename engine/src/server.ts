@@ -1,0 +1,142 @@
+// The local page: every feature waiting for a verdict with its recording and an Accept button.
+// Only this machine may use it: requests must name 127.0.0.1/localhost as Host (and Origin, if
+// sent), so a website that rebinds its own name to 127.0.0.1 cannot read cards or accept them.
+import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { join } from "node:path";
+import type { CardRow, Store } from "./db.ts";
+import { accept } from "./verdict.ts";
+
+const WEB = join(import.meta.dirname, "../../web");
+
+const escape = (s: string) =>
+  s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+/** The newest recording of a waiting card's passing attempt, if one was kept. */
+export function recording(store: Store, id: string): string | null {
+  const landed = [...store.events(id)].reverse().find((e) => e.kind === "card.waiting");
+  const dir = landed?.data.evidence;
+  if (typeof dir !== "string" || !existsSync(dir)) return null;
+  const attempts = readdirSync(dir)
+    .map((name) => /^attempt-(\d+)$/.exec(name))
+    .filter((m) => m !== null)
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+  for (const m of attempts) {
+    const video = findVideo(join(dir, m[0]));
+    if (video) return video;
+  }
+  return null;
+}
+
+function findVideo(dir: string): string | null {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isFile() && entry.name.endsWith(".webm")) return path;
+    if (entry.isDirectory()) {
+      const found = findVideo(path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function cards(store: Store): CardRow[] {
+  return (store.db.prepare("SELECT id FROM cards ORDER BY created_at").all() as { id: string }[]).map((r) => store.getCard(r.id));
+}
+
+const LABELS: Partial<Record<CardRow["state"], string>> = { accepted: "Accepted", rejected: "Rejected", parked: "Parked" };
+
+function page(store: Store, error: string | null): string {
+  const all = cards(store);
+  const waiting = all.filter((c) => c.state === "waiting");
+  const decided = all.filter((c) => c.state === "accepted");
+  const features = waiting.map((c) => {
+    const video = recording(store, c.id)
+      ? `<video controls preload="metadata" src="/cards/${c.id}/video.webm" aria-label="Recording of ${escape(c.card.title)}"></video>`
+      : `<p class="missing">No recording was kept for this feature.</p>`;
+    return `<article class="feature" data-card="${c.id}" data-state="waiting">
+  <h2>${escape(c.card.title)}</h2>
+  <p class="after">${escape(c.card.after)}</p>
+  <div class="watch">${video}
+    <form method="post" action="/cards/${c.id}/accept"><button type="submit">Accept</button></form>
+  </div>
+</article>`;
+  }).join("\n");
+  const done = decided.map((c) =>
+    `<article class="feature decided" data-card="${c.id}" data-state="${c.state}"><h3>${escape(c.card.title)}</h3> <span class="badge">${LABELS[c.state] ?? c.state}</span></article>`).join("\n");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Peeraxis</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<h1>Peeraxis</h1>
+${error ? `<p class="error" role="alert">${escape(error)}</p>` : ""}
+<section><h2 class="heading">Waiting for you</h2>
+${features || `<p class="empty">Nothing is waiting for you.</p>`}
+</section>
+${done ? `<section><h2 class="heading">Done</h2>\n${done}\n</section>` : ""}
+</main></body></html>`;
+}
+
+function sendVideo(req: IncomingMessage, res: ServerResponse, file: string): void {
+  const size = statSync(file).size;
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
+  if (range && (range[1] || range[2])) {
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start > end || start >= size) {
+      res.writeHead(416, { "Content-Range": `bytes */${size}` }).end();
+      return;
+    }
+    res.writeHead(206, { "Content-Type": "video/webm", "Accept-Ranges": "bytes", "Content-Length": end - start + 1, "Content-Range": `bytes ${start}-${end}/${size}` });
+    createReadStream(file, { start, end }).pipe(res);
+    return;
+  }
+  res.writeHead(200, { "Content-Type": "video/webm", "Accept-Ranges": "bytes", "Content-Length": size });
+  createReadStream(file).pipe(res);
+}
+
+/** True when the request comes from this machine's own page, not a rebound or foreign site. */
+export function trusted(req: IncomingMessage, port: number): boolean {
+  const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+  if (!hosts.has(req.headers.host ?? "")) return false;
+  const origin = req.headers.origin;
+  if (origin === undefined) return req.method === "GET" || req.method === "HEAD" || req.headers["sec-fetch-site"] === undefined;
+  return [...hosts].some((h) => origin === `http://${h}`);
+}
+
+export function serve(store: Store, port: number): Server {
+  const server = createServer(async (req, res) => {
+    try {
+      if (!trusted(req, port)) {
+        res.writeHead(403, { "Content-Type": "text/plain" }).end("Forbidden");
+        return;
+      }
+      const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+      const html = (status: number, body: string) =>
+        res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).end(body);
+      const video = /^\/cards\/([0-9a-f-]{36})\/video\.webm$/.exec(url.pathname);
+      const verdict = /^\/cards\/([0-9a-f-]{36})\/accept$/.exec(url.pathname);
+      if (req.method === "GET" && url.pathname === "/") html(200, page(store, null));
+      else if (req.method === "GET" && url.pathname === "/style.css") {
+        res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" }).end(readFileSync(join(WEB, "style.css")));
+      } else if (req.method === "GET" && video) {
+        const file = recording(store, video[1]);
+        if (file) sendVideo(req, res, file);
+        else res.writeHead(404).end();
+      } else if (req.method === "POST" && verdict) {
+        try {
+          await accept(store, verdict[1]);
+        } catch (error) {
+          html(409, page(store, (error as Error).message));
+          return;
+        }
+        res.writeHead(303, { Location: "/" }).end();
+      } else res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
+    } catch (error) {
+      if (!res.headersSent) res.writeHead(500, { "Content-Type": "text/plain" }).end(String(error));
+    }
+  });
+  server.listen(port, "127.0.0.1");
+  return server;
+}

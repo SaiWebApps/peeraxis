@@ -10,6 +10,7 @@ import { loadModels } from "./models.ts";
 import { runAgent } from "./agents.ts";
 import { loadPlugin } from "./plugin.ts";
 import { accept, reject } from "./verdict.ts";
+import { serve } from "./server.ts";
 
 const DATA = process.env.PEERAXIS_HOME ?? join(homedir(), "Library", "Application Support", "Peeraxis Engine");
 const LABEL = "com.saiwebapps.peeraxis";
@@ -91,8 +92,9 @@ else if (command === "status") status();
 else if (command === "accept" && args.length === 1) await accept(open(), find(args[0]));
 else if (command === "reject" && args.length >= 2) await reject(open(), find(args[0]), args.slice(1).join(" "));
 else if (command === "retry" && args.length >= 2) open().move(find(args[0]), "approved", { reason: args.slice(1).join(" ") });
+else if (command === "serve") serve(open(), Number(process.env.PEERAXIS_PORT ?? 4477));
 else if (command === "install") install();
 else {
-  console.error("usage: main.ts run | add <project> <card.json> | status | accept <id> | reject <id> <reason> | retry <id> <reason> | install");
+  console.error("usage: main.ts run | add <project> <card.json> | serve | status | accept <id> | reject <id> <reason> | retry <id> <reason> | install");
   process.exit(2);
 }

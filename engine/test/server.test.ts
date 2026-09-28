@@ -1,0 +1,49 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { request } from "node:http";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Store } from "../src/db.ts";
+import { serve } from "../src/server.ts";
+
+async function freePort(): Promise<number> {
+  const s = createServer();
+  await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+  const { port } = s.address() as { port: number };
+  await new Promise((r) => s.close(r));
+  return port;
+}
+
+test("the page shows a waiting feature's recording, accepts it, and refuses foreign hosts and origins", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "pxhome-"));
+  const seed = JSON.parse(execFileSync(process.execPath, [join(import.meta.dirname, "seed.ts")], { env: { ...process.env, PEERAXIS_HOME: home }, encoding: "utf8" }));
+  const store = new Store(join(home, "peeraxis.sqlite"));
+  const port = await freePort();
+  const server = serve(store, port);
+  t.after(() => server.close());
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${port}`;
+
+  const page = await (await fetch(`${base}/`)).text();
+  assert.match(page, /Greeting says hello/);
+  assert.ok(page.includes(`/cards/${seed.waiting}/video.webm`));
+  const video = await fetch(`${base}/cards/${seed.waiting}/video.webm`, { headers: { Range: "bytes=0-9" } });
+  assert.equal(video.status, 206);
+  assert.equal((await video.arrayBuffer()).byteLength, 10);
+
+  const rebound = await new Promise<number | undefined>((resolve, reject) =>
+    request({ host: "127.0.0.1", port, path: "/", headers: { Host: `evil.example:${port}` } }, (res) => { res.resume(); resolve(res.statusCode); })
+      .on("error", reject).end());
+  assert.equal(rebound, 403);
+  const foreign = await fetch(`${base}/cards/${seed.waiting}/accept`, { method: "POST", headers: { Origin: "http://evil.example" }, redirect: "manual" });
+  assert.equal(foreign.status, 403);
+  assert.equal(store.getCard(seed.waiting).state, "waiting");
+
+  const accepted = await fetch(`${base}/cards/${seed.waiting}/accept`, { method: "POST", headers: { Origin: base }, redirect: "manual" });
+  assert.equal(accepted.status, 303);
+  assert.equal(store.getCard(seed.waiting).state, "accepted");
+  assert.match(await (await fetch(`${base}/`)).text(), /Greeting says hello<\/h3> <span class="badge">Accepted/);
+});
