@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["engine"]
+  "include": ["engine", "web", "playwright.config.ts"]
 }

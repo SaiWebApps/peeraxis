@@ -1,0 +1,19 @@
+{
+  "setup": "npm ci --prefer-offline --no-audit --no-fund",
+  "check": "npx tsc --noEmit && node --test engine/test/",
+  "acceptance": "sh scripts/acceptance.sh",
+  "testFile": "engine/acceptance/{name}.spec.ts",
+  "allowedPaths": [
+    "engine/src/**",
+    "engine/test/**",
+    "web/**"
+  ],
+  "mainBranch": "main",
+  "minutes": {
+    "setup": 10,
+    "check": 10,
+    "acceptance": 10,
+    "build": 60
+  },
+  "notes": "Browser tests (a .spec.ts file importing @playwright/test) run against `node engine/src/main.ts serve`, which must listen on 127.0.0.1:$PEERAXIS_PORT and read cards from $PEERAXIS_HOME/peeraxis.sqlite. scripts/acceptance.sh seeds that home with engine/test/seed.ts first; the seeded card ids are in the JSON file at $PEERAXIS_SEED (keys: project, waiting, building, parked, accepted). Seeded cards: 'Greeting says hello' is waiting for a verdict and has a recording (video.webm) and a screenshot; 'Farewell says goodbye' is building; 'Dark mode for the settings page' is approved; 'Import contacts from a file' is parked with a one-sentence reason; 'Title is bold' is accepted. Use relative URLs; baseURL is set. Other test files run with node --test after the same seeding."
+}

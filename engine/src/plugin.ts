@@ -9,13 +9,14 @@ export type Plugin = {
   health?: string; // optional: prints JSON like {"warnings": 3}
   testFile: string; // where a hidden test goes in a copy; {name} is replaced, e.g. "e2e/peeraxis/{name}.spec.ts"
   testExample?: string; // an existing test the test author should imitate
+  notes?: string; // how acceptance tests run here, told to the test author and the builder
   allowedPaths: string[]; // globs the builder may change
   copyIn: string[]; // untracked dev files copied into every copy, e.g. ".env.peeraxis"
   mainBranch: string;
   minutes: { setup: number; check: number; acceptance: number; build: number };
 };
 
-const KNOWN = new Set(["setup", "check", "acceptance", "health", "testFile", "testExample", "allowedPaths", "copyIn", "mainBranch", "minutes"]);
+const KNOWN = new Set(["setup", "check", "acceptance", "health", "testFile", "testExample", "notes", "allowedPaths", "copyIn", "mainBranch", "minutes"]);
 
 export function loadPlugin(root: string): Plugin {
   const file = join(root, ".peeraxis", "project.json");
@@ -40,6 +41,7 @@ export function loadPlugin(root: string): Plugin {
     health: raw.health as string | undefined,
     testFile: raw.testFile as string,
     testExample: raw.testExample as string | undefined,
+    notes: raw.notes as string | undefined,
     allowedPaths: raw.allowedPaths as string[],
     copyIn: (raw.copyIn as string[] | undefined) ?? [],
     mainBranch: (raw.mainBranch as string | undefined) ?? "main",

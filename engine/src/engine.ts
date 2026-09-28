@@ -108,7 +108,7 @@ export class Engine {
       try {
         const result = await this.ask(row.id, "testAuthor", author, {
           cwd: copy, write: true, minutes: 20,
-          prompt: jobs.testAuthorPrompt(row.card, testFile, plugin.testExample, feedback),
+          prompt: jobs.testAuthorPrompt(row.card, testFile, plugin.testExample, feedback, plugin.notes),
         });
         if (result.limitUntil) { attempt--; continue; }
         const changed = changedPaths(copy, sha);
@@ -188,7 +188,7 @@ export class Engine {
         if (!setup.ok) throw new Park(`Setting up the project failed: ${lastLine(setup.tail)}`);
         const built = await this.ask(row.id, "builder", builder, {
           cwd: copy, write: true, minutes: plugin.minutes.build,
-          prompt: jobs.builderPrompt(row.card, allowed, facts),
+          prompt: jobs.builderPrompt(row.card, allowed, facts, plugin.notes),
           canUseTool: jobs.builderPolicy(copy, allowed, [this.deps.dataDir]),
         });
         if (built.limitUntil) { attempt--; continue; }

@@ -15,7 +15,7 @@ export function cardText(card: Card): string {
   ].join("\n");
 }
 
-export function testAuthorPrompt(card: Card, testFile: string, example: string | undefined, feedback: string | undefined): string {
+export function testAuthorPrompt(card: Card, testFile: string, example: string | undefined, feedback: string | undefined, notes?: string): string {
   return [
     "You write the acceptance test for one feature card in this project. Another agent will build the",
     "feature later without ever seeing your test, so the test must describe the behaviour from the",
@@ -30,6 +30,7 @@ export function testAuthorPrompt(card: Card, testFile: string, example: string |
     "- The feature does not exist yet, so the test must fail on the current code.",
     "- Do not test anything listed under Not included.",
     ...(example ? [`- Follow the structure and helpers of the existing test ${example}.`] : []),
+    ...(notes ? ["", "How acceptance tests run in this project:", notes] : []),
     ...(feedback ? ["", "Your previous test was rejected for this reason; fix it:", feedback] : []),
     "",
     "When done, reply with one sentence saying what the test checks.",
@@ -63,7 +64,7 @@ export function cardCheckPrompt(card: Card, testSource: string): string {
   ].join("\n");
 }
 
-export function builderPrompt(card: Card, allowed: string[], facts: string[]): string {
+export function builderPrompt(card: Card, allowed: string[], facts: string[], notes?: string): string {
   return [
     "Build this feature in the current project.",
     "",
@@ -73,6 +74,7 @@ export function builderPrompt(card: Card, allowed: string[], facts: string[]): s
     "An acceptance test you cannot see will check each watched step from the outside, then the",
     "project's full check (types, lint, tests, build) must pass. Keep changes small and in the style",
     "of the surrounding code. Do not add dependencies unless the card needs them. Do not commit.",
+    ...(notes ? ["", "How the acceptance test will run:", notes] : []),
     ...(facts.length ? ["", "What went wrong last time (fix these):", ...facts.map((f) => `- ${f}`)] : []),
     "",
     "When done, reply with at most three plain sentences about what you changed.",
