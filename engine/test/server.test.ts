@@ -28,7 +28,11 @@ test("the page shows a waiting feature's recording, accepts it, and refuses fore
   const base = `http://127.0.0.1:${port}`;
 
   const page = await (await fetch(`${base}/`)).text();
-  assert.match(page, /Greeting says hello/);
+  assert.match(page, /Greeting says hello<\/h2> <span class="badge waiting">Waiting for you/);
+  assert.match(page, /Farewell says goodbye<\/h2> <span class="badge building">Building/);
+  assert.match(page, /Dark mode for the settings page<\/h2> <span class="badge queued">Queued/);
+  assert.match(page, /Import contacts from a file<\/h2> <span class="badge stopped">Stopped/);
+  assert.match(page, /Title is bold<\/h2> <span class="badge accepted">Accepted/);
   assert.ok(page.includes(`/cards/${seed.waiting}/video.webm`));
   const video = await fetch(`${base}/cards/${seed.waiting}/video.webm`, { headers: { Range: "bytes=0-9" } });
   assert.equal(video.status, 206);
@@ -45,5 +49,5 @@ test("the page shows a waiting feature's recording, accepts it, and refuses fore
   const accepted = await fetch(`${base}/cards/${seed.waiting}/accept`, { method: "POST", headers: { Origin: base }, redirect: "manual" });
   assert.equal(accepted.status, 303);
   assert.equal(store.getCard(seed.waiting).state, "accepted");
-  assert.match(await (await fetch(`${base}/`)).text(), /Greeting says hello<\/h3> <span class="badge">Accepted/);
+  assert.match(await (await fetch(`${base}/`)).text(), /Greeting says hello<\/h2> <span class="badge accepted">Accepted/);
 });

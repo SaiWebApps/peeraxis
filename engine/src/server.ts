@@ -1,4 +1,5 @@
-// The local page: every feature waiting for a verdict with its recording and an Accept button.
+// The local page: every feature with where it is; one waiting for a verdict also shows its
+// recording and an Accept button.
 // Only this machine may use it: requests must name 127.0.0.1/localhost as Host (and Origin, if
 // sent), so a website that rebinds its own name to 127.0.0.1 cannot read cards or accept them.
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -44,26 +45,34 @@ function cards(store: Store): CardRow[] {
   return (store.db.prepare("SELECT id FROM cards ORDER BY created_at").all() as { id: string }[]).map((r) => store.getCard(r.id));
 }
 
-const LABELS: Partial<Record<CardRow["state"], string>> = { accepted: "Accepted", rejected: "Rejected", parked: "Parked" };
+/** Where a feature is, as the owner reads it; drafts are not features yet. */
+const WHERE: Partial<Record<CardRow["state"], [label: string, tone: string]>> = {
+  approved: ["Queued", "queued"],
+  testing: ["Building", "building"],
+  building: ["Building", "building"],
+  checking: ["Building", "building"],
+  split: ["Building", "building"],
+  waiting: ["Waiting for you", "waiting"],
+  accepted: ["Accepted", "accepted"],
+  rejected: ["Stopped", "stopped"],
+  parked: ["Stopped", "stopped"],
+};
 
 function page(store: Store, error: string | null): string {
-  const all = cards(store);
-  const waiting = all.filter((c) => c.state === "waiting");
-  const decided = all.filter((c) => c.state === "accepted");
-  const features = waiting.map((c) => {
+  const features = cards(store).filter((c) => WHERE[c.state]).map((c) => {
+    const [label, tone] = WHERE[c.state]!;
+    const head = `<div class="row"><h2>${escape(c.card.title)}</h2> <span class="badge ${tone}">${label}</span></div>`;
+    if (c.state !== "waiting") return `<article class="feature" data-card="${c.id}" data-state="${c.state}">${head}</article>`;
     const video = recording(store, c.id)
       ? `<video controls preload="metadata" src="/cards/${c.id}/video.webm" aria-label="Recording of ${escape(c.card.title)}"></video>`
       : `<p class="missing">No recording was kept for this feature.</p>`;
-    return `<article class="feature" data-card="${c.id}" data-state="waiting">
-  <h2>${escape(c.card.title)}</h2>
+    return `<article class="feature" data-card="${c.id}" data-state="waiting">${head}
   <p class="after">${escape(c.card.after)}</p>
   <div class="watch">${video}
     <form method="post" action="/cards/${c.id}/accept"><button type="submit">Accept</button></form>
   </div>
 </article>`;
   }).join("\n");
-  const done = decided.map((c) =>
-    `<article class="feature decided" data-card="${c.id}" data-state="${c.state}"><h3>${escape(c.card.title)}</h3> <span class="badge">${LABELS[c.state] ?? c.state}</span></article>`).join("\n");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Peeraxis</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -71,10 +80,7 @@ function page(store: Store, error: string | null): string {
 <body><main>
 <h1>Peeraxis</h1>
 ${error ? `<p class="error" role="alert">${escape(error)}</p>` : ""}
-<section><h2 class="heading">Waiting for you</h2>
-${features || `<p class="empty">Nothing is waiting for you.</p>`}
-</section>
-${done ? `<section><h2 class="heading">Done</h2>\n${done}\n</section>` : ""}
+${features || `<p class="empty">There are no features yet.</p>`}
 </main></body></html>`;
 }
 
