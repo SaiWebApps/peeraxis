@@ -12,34 +12,40 @@ export async function syncWaiting(store: Store, root: string, plugin: Plugin): P
   const main = git(root, ["rev-parse", `refs/heads/${plugin.mainBranch}`]);
   if (tryGit(root, ["merge-base", "--is-ancestor", main, tip]) !== null) return; // already on top
   const fork = git(root, ["merge-base", main, tip]);
+  const problem = await replayWaiting(store, root, plugin, main, fork, tip);
+  if (problem) store.event(null, "waiting.stuck", { reason: problem });
+  else store.event(null, "waiting.rebased", { onto: main });
+}
+
+/**
+ * Replays the waiting commits after `fork` onto `onto`, re-checks them, and moves the waiting
+ * branch there only if that all succeeds. Returns why it did not, or null once moved.
+ */
+export async function replayWaiting(store: Store, root: string, plugin: Plugin, onto: string, fork: string, tip: string): Promise<string | null> {
   const old = git(root, ["rev-list", "--reverse", `${fork}..${tip}`]).split("\n").filter(Boolean);
   const copy = makeCopy(root, tip, plugin.copyIn);
   try {
-    git(copy, ["fetch", "--quiet", root, main]);
-    if (tryGit(copy, ["rebase", "--quiet", "--onto", main, fork]) === null) {
+    git(copy, ["fetch", "--quiet", root, onto]);
+    if (tryGit(copy, ["rebase", "--quiet", "--onto", onto, fork]) === null) {
       tryGit(copy, ["rebase", "--abort"]);
-      store.event(null, "waiting.stuck", { reason: "The waiting features no longer apply cleanly on top of main." });
-      return;
+      return "The waiting features no longer apply cleanly.";
     }
     const setup = await runStage({ command: plugin.setup, cwd: copy, timeoutMs: plugin.minutes.setup * 60_000 });
     const check = setup.ok ? await runStage({ command: plugin.check, cwd: copy, timeoutMs: plugin.minutes.check * 60_000 }) : setup;
-    if (!check.ok) {
-      store.event(null, "waiting.stuck", { reason: "The waiting features fail the project check on top of the new main." });
-      return;
-    }
-    const fresh = git(copy, ["rev-list", "--reverse", `${main}..HEAD`]).split("\n").filter(Boolean);
-    if (fresh.length !== old.length) return; // a commit became empty; leave everything as it was
-    const newTip = fresh.at(-1)!;
-    git(root, ["fetch", "--quiet", "--no-tags", copy, `${newTip}:refs/peeraxis/landing/${newTip}`]);
+    if (!check.ok) return "The waiting features fail the project check.";
+    const fresh = git(copy, ["rev-list", "--reverse", `${onto}..HEAD`]).split("\n").filter(Boolean);
+    if (fresh.length !== old.length) return "A waiting feature became empty."; // leave everything as it was
+    const newTip = fresh.at(-1) ?? onto;
+    if (fresh.length) git(root, ["fetch", "--quiet", "--no-tags", copy, `${newTip}:refs/peeraxis/landing/${newTip}`]);
     const moved = tryGit(root, ["update-ref", `refs/heads/${WAITING}`, newTip, tip]) !== null;
-    tryGit(root, ["update-ref", "-d", `refs/peeraxis/landing/${newTip}`]);
-    if (!moved) return;
+    if (fresh.length) tryGit(root, ["update-ref", "-d", `refs/peeraxis/landing/${newTip}`]);
+    if (!moved) return "The waiting features changed meanwhile.";
     const map = Object.fromEntries(old.map((sha, i) => [sha, fresh[i]]));
     for (const id of waitingCards(store, root)) {
       const sha = waitingShaOf(store, id);
       if (sha && map[sha]) store.event(id, "waiting.sha", { sha: map[sha], was: sha });
     }
-    store.event(null, "waiting.rebased", { onto: main, commits: old.length });
+    return null;
   } finally {
     removeCopy(copy);
   }

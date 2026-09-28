@@ -1,12 +1,12 @@
 // The local page: every feature with where it is; one waiting for a verdict also shows its
-// recording and an Accept button.
+// recording, an Accept button, and a quieter Reject that asks for one sentence of why.
 // Only this machine may use it: requests must name 127.0.0.1/localhost as Host (and Origin, if
 // sent), so a website that rebinds its own name to 127.0.0.1 cannot read cards or accept them.
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { CardRow, Store } from "./db.ts";
-import { accept } from "./verdict.ts";
+import { accept, reject } from "./verdict.ts";
 
 const WEB = join(import.meta.dirname, "../../web");
 
@@ -54,7 +54,7 @@ const WHERE: Partial<Record<CardRow["state"], [label: string, tone: string]>> = 
   split: ["Building", "building"],
   waiting: ["Waiting for you", "waiting"],
   accepted: ["Accepted", "accepted"],
-  rejected: ["Stopped", "stopped"],
+  rejected: ["Rejected", "stopped"],
   parked: ["Stopped", "stopped"],
 };
 
@@ -62,6 +62,11 @@ function page(store: Store, error: string | null): string {
   const features = cards(store).filter((c) => WHERE[c.state]).map((c) => {
     const [label, tone] = WHERE[c.state]!;
     const head = `<div class="row"><h2>${escape(c.card.title)}</h2> <span class="badge ${tone}">${label}</span></div>`;
+    if (c.state === "rejected") {
+      const reason = [...store.events(c.id)].reverse().find((e) => e.kind === "card.rejected")?.data.reason;
+      const why = typeof reason === "string" ? `\n  <p class="reason">${escape(reason)}</p>\n` : "";
+      return `<article class="feature" data-card="${c.id}" data-state="rejected">${head}${why}</article>`;
+    }
     if (c.state !== "waiting") return `<article class="feature" data-card="${c.id}" data-state="${c.state}">${head}</article>`;
     const video = recording(store, c.id)
       ? `<video controls preload="metadata" src="/cards/${c.id}/video.webm" aria-label="Recording of ${escape(c.card.title)}"></video>`
@@ -69,7 +74,13 @@ function page(store: Store, error: string | null): string {
     return `<article class="feature" data-card="${c.id}" data-state="waiting">${head}
   <p class="after">${escape(c.card.after)}</p>
   <div class="watch">${video}
-    <form method="post" action="/cards/${c.id}/accept"><button type="submit">Accept</button></form>
+    <div class="verdict">
+      <form method="post" action="/cards/${c.id}/accept"><button type="submit">Accept</button></form>
+      <form class="reject" method="post" action="/cards/${c.id}/reject">
+        <input type="text" name="reason" required maxlength="300" placeholder="Why reject? One sentence" aria-label="Why reject ${escape(c.card.title)}">
+        <button type="submit">Reject</button>
+      </form>
+    </div>
   </div>
 </article>`;
   }).join("\n");
@@ -102,6 +113,15 @@ function sendVideo(req: IncomingMessage, res: ServerResponse, file: string): voi
   createReadStream(file).pipe(res);
 }
 
+async function body(req: IncomingMessage): Promise<string> {
+  let text = "";
+  for await (const chunk of req) {
+    text += chunk;
+    if (text.length > 10_000) throw new Error("Too much was sent.");
+  }
+  return text;
+}
+
 /** True when the request comes from this machine's own page, not a rebound or foreign site. */
 export function trusted(req: IncomingMessage, port: number): boolean {
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
@@ -122,7 +142,7 @@ export function serve(store: Store, port: number): Server {
       const html = (status: number, body: string) =>
         res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).end(body);
       const video = /^\/cards\/([0-9a-f-]{36})\/video\.webm$/.exec(url.pathname);
-      const verdict = /^\/cards\/([0-9a-f-]{36})\/accept$/.exec(url.pathname);
+      const verdict = /^\/cards\/([0-9a-f-]{36})\/(accept|reject)$/.exec(url.pathname);
       if (req.method === "GET" && url.pathname === "/") html(200, page(store, null));
       else if (req.method === "GET" && url.pathname === "/style.css") {
         res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" }).end(readFileSync(join(WEB, "style.css")));
@@ -132,7 +152,8 @@ export function serve(store: Store, port: number): Server {
         else res.writeHead(404).end();
       } else if (req.method === "POST" && verdict) {
         try {
-          await accept(store, verdict[1]);
+          if (verdict[2] === "accept") await accept(store, verdict[1]);
+          else await reject(store, verdict[1], new URLSearchParams(await body(req)).get("reason") ?? "");
         } catch (error) {
           html(409, page(store, (error as Error).message));
           return;

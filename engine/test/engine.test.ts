@@ -229,8 +229,34 @@ test("accept moves main forward to the feature and removes the empty waiting bra
   const other = t.store.approve(t.root, CARD);
   await t.engine.step();
   await reject(t.store, other, "Too quiet.");
-  assert.equal(git(t.root, "rev-parse", WAITING), git(t.root, "rev-parse", "main"));
+  assert.equal(git(t.root, "branch", "--list", WAITING), "");
   assert.equal(t.store.getCard(other).state, "rejected");
+});
+
+test("an older waiting feature can be rejected; the newer one is replayed without it", async () => {
+  const { accept, reject } = await import("../src/verdict.ts");
+  const s = setup();
+  const older = s.store.approve(s.root, CARD);
+  await s.engine.step();
+  // A second feature lands on top of the first.
+  const newer = s.store.approve(s.root, { ...CARD, title: "Notes file" });
+  for (const state of ["testing", "building", "checking"] as const) s.store.move(newer, state);
+  git(s.root, "checkout", "-q", WAITING);
+  writeFileSync(join(s.root, "notes.txt"), "notes\n");
+  git(s.root, "add", "notes.txt");
+  git(s.root, "commit", "-qm", "Notes file");
+  s.store.move(newer, "waiting", { sha: git(s.root, "rev-parse", "HEAD") });
+  git(s.root, "checkout", "-q", "main");
+
+  await assert.rejects(reject(s.store, older, "  "));
+  await reject(s.store, older, "The greeting should be warmer.");
+  assert.equal(s.store.getCard(older).state, "rejected");
+  assert.equal(git(s.root, "log", "--format=%s", "-1", WAITING), "Notes file");
+  assert.equal(git(s.root, "rev-parse", `${WAITING}^`), git(s.root, "rev-parse", "main"));
+  assert.doesNotMatch(git(s.root, "show", `${WAITING}:app.js`), /hello/);
+  await accept(s.store, newer);
+  assert.equal(s.store.getCard(newer).state, "accepted");
+  assert.equal(git(s.root, "branch", "--list", WAITING), "");
 });
 
 test("the parts of a split card run before cards approved after it", async () => {

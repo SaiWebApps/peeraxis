@@ -46,8 +46,28 @@ test("the page shows a waiting feature's recording, accepts it, and refuses fore
   assert.equal(foreign.status, 403);
   assert.equal(store.getCard(seed.waiting).state, "waiting");
 
+  const empty = await fetch(`${base}/cards/${seed.waiting}/reject`, { method: "POST", headers: { Origin: base }, body: new URLSearchParams({ reason: " " }), redirect: "manual" });
+  assert.equal(empty.status, 409);
+  assert.equal(store.getCard(seed.waiting).state, "waiting");
+  assert.match(page, new RegExp(`action="/cards/${seed.waiting}/reject"`));
   const accepted = await fetch(`${base}/cards/${seed.waiting}/accept`, { method: "POST", headers: { Origin: base }, redirect: "manual" });
   assert.equal(accepted.status, 303);
   assert.equal(store.getCard(seed.waiting).state, "accepted");
   assert.match(await (await fetch(`${base}/`)).text(), /Greeting says hello<\/h2> <span class="badge accepted">Accepted/);
+});
+
+test("the page rejects a waiting feature with one sentence of why and shows it", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "pxhome-"));
+  const seed = JSON.parse(execFileSync(process.execPath, [join(import.meta.dirname, "seed.ts")], { env: { ...process.env, PEERAXIS_HOME: home }, encoding: "utf8" }));
+  const store = new Store(join(home, "peeraxis.sqlite"));
+  const port = await freePort();
+  const server = serve(store, port);
+  t.after(() => server.close());
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${port}`;
+
+  const rejected = await fetch(`${base}/cards/${seed.waiting}/reject`, { method: "POST", headers: { Origin: base }, body: new URLSearchParams({ reason: "The greeting should be <warmer>" }), redirect: "manual" });
+  assert.equal(rejected.status, 303);
+  assert.equal(store.getCard(seed.waiting).state, "rejected");
+  assert.match(await (await fetch(`${base}/`)).text(), /Greeting says hello<\/h2> <span class="badge stopped">Rejected<\/span><\/div>\n  <p class="reason">The greeting should be &lt;warmer&gt;<\/p>/);
 });

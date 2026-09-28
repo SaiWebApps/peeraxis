@@ -1,9 +1,10 @@
 // The owner's verdict on a waiting feature. Accept moves main forward to it; reject takes it
-// off the waiting branch. Neither ever rewrites main or loses the owner's uncommitted work.
+// off the waiting branch, replaying any newer waiting features without it. Neither ever rewrites
+// main or loses the owner's uncommitted work.
 import type { Store } from "./db.ts";
 import { WAITING, git, tryGit } from "./git.ts";
 import { loadPlugin } from "./plugin.ts";
-import { syncWaiting, waitingShaOf } from "./sync.ts";
+import { replayWaiting, syncWaiting, waitingShaOf } from "./sync.ts";
 
 function waitingSha(store: Store, id: string): string {
   const row = store.getCard(id);
@@ -39,12 +40,24 @@ export async function accept(store: Store, id: string): Promise<void> {
   }
 }
 
+/** Takes one waiting feature off the waiting branch; newer ones are replayed without it. */
 export async function reject(store: Store, id: string, reason: string): Promise<void> {
+  const why = reason.trim();
+  if (!why) throw new Error("Say in one sentence why the feature is rejected.");
   const row = store.getCard(id);
-  await syncWaiting(store, row.project, loadPlugin(row.project));
+  const root = row.project;
+  const plugin = loadPlugin(root);
+  await syncWaiting(store, root, plugin);
   const sha = waitingSha(store, id);
-  const tip = git(row.project, ["rev-parse", `refs/heads/${WAITING}`]);
-  if (tip !== sha) throw new Error("Only the newest waiting feature can be rejected for now; verdict the newer ones first.");
-  git(row.project, ["update-ref", `refs/heads/${WAITING}`, `${sha}^`, sha]);
-  store.move(id, "rejected", { sha, reason });
+  const tip = git(root, ["rev-parse", `refs/heads/${WAITING}`]);
+  const parent = git(root, ["rev-parse", `${sha}^`]);
+  if (tip === sha) git(root, ["update-ref", `refs/heads/${WAITING}`, parent, sha]);
+  else {
+    const problem = await replayWaiting(store, root, plugin, parent, sha, tip);
+    if (problem) throw new Error(`The newer waiting features could not be kept without this one: ${problem}`);
+  }
+  store.move(id, "rejected", { sha, reason: why });
+  if (git(root, ["rev-parse", `refs/heads/${WAITING}`]) === git(root, ["rev-parse", `refs/heads/${plugin.mainBranch}`])) {
+    git(root, ["branch", "--quiet", "-D", WAITING]); // nothing left waiting
+  }
 }
