@@ -67,6 +67,7 @@ export class Store {
   constructor(file: string) {
     this.db = new DatabaseSync(file);
     this.db.exec(`
+      PRAGMA busy_timeout = 5000;
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS cards (
         id TEXT PRIMARY KEY, project TEXT NOT NULL, parent TEXT,

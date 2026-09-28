@@ -11,6 +11,7 @@ import { runAgent } from "./agents.ts";
 import { loadPlugin } from "./plugin.ts";
 import { accept, reject } from "./verdict.ts";
 import { serve } from "./server.ts";
+import { dailyDigest } from "./digest.ts";
 
 const DATA = process.env.PEERAXIS_HOME ?? join(homedir(), "Library", "Application Support", "Peeraxis Engine");
 const LABEL = "com.saiwebapps.peeraxis";
@@ -33,6 +34,10 @@ async function run(): Promise<void> {
   const modelsFile = join(DATA, "models.json");
   const engine = new Engine({ store, dataDir: DATA, models: () => loadModels(modelsFile), agent: runAgent });
   store.event(null, "engine.started", { pid: process.pid });
+  // The daily check runs on its own timer, so long builds and model-limit sleeps never skip a day.
+  const check = () => { try { dailyDigest(store); } catch (error) { store.event(null, "digest.error", { message: String(error) }); } };
+  check();
+  setInterval(check, 60_000);
   for (;;) {
     try {
       if (!(await engine.step())) await sleep(30_000);
@@ -94,7 +99,8 @@ else if (command === "reject" && args.length >= 2) await reject(open(), find(arg
 else if (command === "retry" && args.length >= 2) open().move(find(args[0]), "approved", { reason: args.slice(1).join(" ") });
 else if (command === "serve") serve(open(), Number(process.env.PEERAXIS_PORT ?? 4477));
 else if (command === "install") install();
+else if (command === "digest") console.log(dailyDigest(open()) ?? "Nothing new to send today.");
 else {
-  console.error("usage: main.ts run | add <project> <card.json> | serve | status | accept <id> | reject <id> <reason> | retry <id> <reason> | install");
+  console.error("usage: main.ts run | add <project> <card.json> | serve | digest | status | accept <id> | reject <id> <reason> | retry <id> <reason> | install");
   process.exit(2);
 }
