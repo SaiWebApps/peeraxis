@@ -90,8 +90,9 @@ else if (command === "add" && args.length === 2) add(args[0], args[1]);
 else if (command === "status") status();
 else if (command === "accept" && args.length === 1) await accept(open(), find(args[0]));
 else if (command === "reject" && args.length >= 2) await reject(open(), find(args[0]), args.slice(1).join(" "));
+else if (command === "retry" && args.length >= 2) open().move(find(args[0]), "approved", { reason: args.slice(1).join(" ") });
 else if (command === "install") install();
 else {
-  console.error("usage: main.ts run | add <project> <card.json> | status | accept <id> | reject <id> <reason> | install");
+  console.error("usage: main.ts run | add <project> <card.json> | status | accept <id> | reject <id> <reason> | retry <id> <reason> | install");
   process.exit(2);
 }
