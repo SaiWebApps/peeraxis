@@ -4,5 +4,5 @@ import { test } from "node:test";
 
 const todo = (name: string) => test(name, { todo: true });
 
-todo("the engine runs as a launchd service and survives a restart");
+// Done by hand on 2026-09-27: `main.ts install` loads the launchd service; killing it restarts it.
 todo("a hand-written Persuaider card reaches the waiting branch with real models and a recording, with no owner message");
