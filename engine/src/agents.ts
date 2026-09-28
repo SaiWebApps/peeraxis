@@ -82,6 +82,11 @@ async function runClaude(run: AgentRun): Promise<AgentResult> {
     if (!limitUntil && /rate.?limit|usage limit|429/i.test(text)) limitUntil = Date.now() + 60 * 60_000;
     return { ok: false, text: redact(text), limitUntil, error: final.subtype };
   }
+  // The model that actually ran must be the one asked for (an unpinned default once ran a banned model).
+  const used = Object.keys(final.modelUsage ?? {});
+  if (used.length && !used.some((id) => id.startsWith(run.model.id))) {
+    return { ok: false, text: "", error: `asked for ${run.model.id} but ${used.join(", ")} ran` };
+  }
   return { ok: true, text: redact(final.result), json: final.structured_output };
 }
 
