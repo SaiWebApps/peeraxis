@@ -219,7 +219,7 @@ test("accept moves main forward to the feature and removes the empty waiting bra
   const id = s.store.approve(s.root, CARD);
   await s.engine.step();
   const sha = git(s.root, "rev-parse", WAITING);
-  accept(s.store, id);
+  await accept(s.store, id);
   assert.equal(git(s.root, "rev-parse", "main"), sha);
   assert.match(readFileSync(join(s.root, "app.js"), "utf8"), /hello/);
   assert.equal(git(s.root, "branch", "--list", WAITING), "");
@@ -228,7 +228,7 @@ test("accept moves main forward to the feature and removes the empty waiting bra
   const t = setup();
   const other = t.store.approve(t.root, CARD);
   await t.engine.step();
-  reject(t.store, other, "Too quiet.");
+  await reject(t.store, other, "Too quiet.");
   assert.equal(git(t.root, "rev-parse", WAITING), git(t.root, "rev-parse", "main"));
   assert.equal(t.store.getCard(other).state, "rejected");
 });
@@ -244,4 +244,19 @@ test("the parts of a split card run before cards approved after it", async () =>
   const part = s.store.approve(s.root, { ...CARD, title: "Part one" }, first);
   assert.equal(s.store.next()?.id, part);
   assert.ok(later);
+});
+
+test("when main moves while features wait, they are replayed on top and can still be accepted in order", async () => {
+  const { accept } = await import("../src/verdict.ts");
+  const s = setup();
+  const first = s.store.approve(s.root, CARD);
+  await s.engine.step();
+  // The owner commits to main while the feature waits.
+  writeFileSync(join(s.root, "tests/extra.test.js"), 'import { test } from "node:test";\ntest("extra", () => {});\n');
+  git(s.root, "add", "-A");
+  git(s.root, "commit", "-qm", "owner work");
+  await assert.rejects(accept(s.store, "not-a-card"));
+  await accept(s.store, first);
+  assert.equal(s.store.getCard(first).state, "accepted");
+  assert.match(git(s.root, "log", "--format=%s", "-2", "main"), /Greeting says hello\nowner work/);
 });

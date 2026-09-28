@@ -10,6 +10,7 @@ import type { AgentRunner, AgentResult } from "./agents.ts";
 import { runStage, type StageResult } from "./proc.ts";
 import { baseOf, changedPaths, commitAll, diff, git, landOnWaiting, litter, makeCopy, newLitter, outsideAllowed, removeCopy } from "./git.ts";
 import * as jobs from "./jobs.ts";
+import { syncWaiting } from "./sync.ts";
 import { measure, worse, type Health } from "./health.ts";
 
 export type Deps = { store: Store; dataDir: string; models: () => ModelsConfig; agent: AgentRunner };
@@ -40,6 +41,7 @@ export class Engine {
     const row = this.deps.store.next();
     if (!row) return false;
     const plugin = loadPlugin(row.project);
+    await syncWaiting(this.deps.store, row.project, plugin);
     const before = litter(row.project);
     try {
       if (row.state === "approved") this.deps.store.move(row.id, "testing");

@@ -3,23 +3,27 @@
 import type { Store } from "./db.ts";
 import { WAITING, git, tryGit } from "./git.ts";
 import { loadPlugin } from "./plugin.ts";
+import { syncWaiting, waitingShaOf } from "./sync.ts";
 
 function waitingSha(store: Store, id: string): string {
   const row = store.getCard(id);
   if (row.state !== "waiting") throw new Error(`"${row.card.title}" is ${row.state}, not waiting for a verdict.`);
-  const landed = [...store.events(id)].reverse().find((e) => e.kind === "card.waiting");
-  if (!landed?.data.sha) throw new Error("No landed commit is recorded for this card.");
-  return String(landed.data.sha);
+  const sha = waitingShaOf(store, id);
+  if (!sha) throw new Error("No landed commit is recorded for this card.");
+  return sha;
 }
 
-export function accept(store: Store, id: string): void {
+/** Moves main forward to one waiting feature. Verdicts go oldest first, one feature at a time. */
+export async function accept(store: Store, id: string): Promise<void> {
   const row = store.getCard(id);
-  const sha = waitingSha(store, id);
   const root = row.project;
-  const main = loadPlugin(root).mainBranch;
+  const plugin = loadPlugin(root);
+  await syncWaiting(store, root, plugin);
+  const sha = waitingSha(store, id);
+  const main = plugin.mainBranch;
   const mainSha = git(root, ["rev-parse", `refs/heads/${main}`]);
-  if (tryGit(root, ["merge-base", "--is-ancestor", mainSha, sha]) === null) {
-    throw new Error(`${main} has moved in a way that cannot simply move forward to this feature.`);
+  if (tryGit(root, ["rev-parse", `${sha}^`]) !== mainSha) {
+    throw new Error(`Give a verdict on the older waiting features first, or ${main} has moved and the waiting features could not be brought up to date.`);
   }
   if (tryGit(root, ["symbolic-ref", "--short", "HEAD"]) === main) {
     if (git(root, ["status", "--porcelain", "--untracked-files=no"])) {
@@ -35,8 +39,9 @@ export function accept(store: Store, id: string): void {
   }
 }
 
-export function reject(store: Store, id: string, reason: string): void {
+export async function reject(store: Store, id: string, reason: string): Promise<void> {
   const row = store.getCard(id);
+  await syncWaiting(store, row.project, loadPlugin(row.project));
   const sha = waitingSha(store, id);
   const tip = git(row.project, ["rev-parse", `refs/heads/${WAITING}`]);
   if (tip !== sha) throw new Error("Only the newest waiting feature can be rejected for now; verdict the newer ones first.");
