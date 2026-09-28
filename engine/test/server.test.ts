@@ -70,4 +70,5 @@ test("the page rejects a waiting feature with one sentence of why and shows it",
   assert.equal(rejected.status, 303);
   assert.equal(store.getCard(seed.waiting).state, "rejected");
   assert.match(await (await fetch(`${base}/`)).text(), /Greeting says hello<\/h2> <span class="badge stopped">Rejected<\/span><\/div>\n  <p class="reason">The greeting should be &lt;warmer&gt;<\/p>/);
+  assert.match(await (await fetch(`${base}/`)).text(), /Import contacts from a file<\/h2> <span class="badge stopped">Stopped<\/span><\/div>\n  <p class="reason">Parked: the project&#39;s own check fails before any change, so nothing was built\.<\/p>/);
 });

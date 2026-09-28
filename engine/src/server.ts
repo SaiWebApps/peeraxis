@@ -62,10 +62,11 @@ function page(store: Store, error: string | null): string {
   const features = cards(store).filter((c) => WHERE[c.state]).map((c) => {
     const [label, tone] = WHERE[c.state]!;
     const head = `<div class="row"><h2>${escape(c.card.title)}</h2> <span class="badge ${tone}">${label}</span></div>`;
-    if (c.state === "rejected") {
-      const reason = [...store.events(c.id)].reverse().find((e) => e.kind === "card.rejected")?.data.reason;
+    if (c.state === "rejected" || c.state === "parked") {
+      const data = [...store.events(c.id)].reverse().find((e) => e.kind === `card.${c.state}`)?.data;
+      const reason = c.state === "rejected" ? data?.reason : data?.sentence;
       const why = typeof reason === "string" ? `\n  <p class="reason">${escape(reason)}</p>\n` : "";
-      return `<article class="feature" data-card="${c.id}" data-state="rejected">${head}${why}</article>`;
+      return `<article class="feature" data-card="${c.id}" data-state="${c.state}">${head}${why}</article>`;
     }
     if (c.state !== "waiting") return `<article class="feature" data-card="${c.id}" data-state="${c.state}">${head}</article>`;
     const video = recording(store, c.id)
