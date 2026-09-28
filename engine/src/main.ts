@@ -9,6 +9,7 @@ import { Engine, Wait } from "./engine.ts";
 import { loadModels } from "./models.ts";
 import { runAgent } from "./agents.ts";
 import { loadPlugin } from "./plugin.ts";
+import { accept, reject } from "./verdict.ts";
 
 const DATA = process.env.PEERAXIS_HOME ?? join(homedir(), "Library", "Application Support", "Peeraxis Engine");
 const LABEL = "com.saiwebapps.peeraxis";
@@ -48,6 +49,13 @@ function add(project: string, cardFile: string): void {
   console.log(open().approve(root, card));
 }
 
+/** Accepts the card whose id starts with `prefix`. */
+function find(prefix: string): string {
+  const rows = open().db.prepare("SELECT id FROM cards WHERE id LIKE ?").all(`${prefix}%`) as { id: string }[];
+  if (rows.length !== 1) throw new Error(`${rows.length} cards match ${prefix}`);
+  return rows[0].id;
+}
+
 function status(): void {
   const rows = open().db.prepare("SELECT id, state, card, updated_at FROM cards ORDER BY created_at").all() as Record<string, string>[];
   for (const r of rows) console.log(`${r.state.padEnd(9)} ${JSON.parse(r.card).title}  (${r.id.slice(0, 8)}, ${r.updated_at})`);
@@ -80,8 +88,10 @@ const [command, ...args] = process.argv.slice(2);
 if (command === "run") await run();
 else if (command === "add" && args.length === 2) add(args[0], args[1]);
 else if (command === "status") status();
+else if (command === "accept" && args.length === 1) accept(open(), find(args[0]));
+else if (command === "reject" && args.length >= 2) reject(open(), find(args[0]), args.slice(1).join(" "));
 else if (command === "install") install();
 else {
-  console.error("usage: main.ts run | add <project> <card.json> | status | install");
+  console.error("usage: main.ts run | add <project> <card.json> | status | accept <id> | reject <id> <reason> | install");
   process.exit(2);
 }

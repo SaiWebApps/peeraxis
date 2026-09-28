@@ -212,3 +212,23 @@ test("leftovers in the owner's project are named; only report, video and screens
   const files = execFileSync("find", [join(s.dataDir, "cards", id, "evidence"), "-type", "f"], { encoding: "utf8" }).trim().split("\n");
   assert.ok(files.every((f) => /report\.json$|\.webm$|\.png$|check-\d+\.log$/.test(f)), files.join("\n"));
 });
+
+test("accept moves main forward to the feature and removes the empty waiting branch; reject takes it off", async () => {
+  const { accept, reject } = await import("../src/verdict.ts");
+  const s = setup();
+  const id = s.store.approve(s.root, CARD);
+  await s.engine.step();
+  const sha = git(s.root, "rev-parse", WAITING);
+  accept(s.store, id);
+  assert.equal(git(s.root, "rev-parse", "main"), sha);
+  assert.match(readFileSync(join(s.root, "app.js"), "utf8"), /hello/);
+  assert.equal(git(s.root, "branch", "--list", WAITING), "");
+  assert.equal(s.store.getCard(id).state, "accepted");
+
+  const t = setup();
+  const other = t.store.approve(t.root, CARD);
+  await t.engine.step();
+  reject(t.store, other, "Too quiet.");
+  assert.equal(git(t.root, "rev-parse", WAITING), git(t.root, "rev-parse", "main"));
+  assert.equal(t.store.getCard(other).state, "rejected");
+});
