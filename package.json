@@ -1,0 +1,20 @@
+{
+  "name": "peeraxis",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "check": "tsc --noEmit && node --test",
+    "engine": "node engine/src/main.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.283",
+    "@openai/codex-sdk": "^0.157.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  }
+}
