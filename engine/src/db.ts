@@ -84,10 +84,19 @@ export class Store {
     if (problem) throw new Error(problem);
     const id = randomUUID();
     const now = new Date().toISOString();
+    // The queue runs in created_at order. Parts of a split card take their parent's place in
+    // the queue ("<parent time>~<n>" sorts right after it), so later cards never jump ahead.
+    const order = parent ? this.queuePlace(parent) : now;
     this.db.prepare("INSERT INTO cards VALUES (?, ?, ?, ?, ?, 'approved', ?, ?)")
-      .run(id, project, parent, JSON.stringify(card), cardHash(card), now, now);
+      .run(id, project, parent, JSON.stringify(card), cardHash(card), order, now);
     this.event(id, "card.approved", { title: card.title, parent });
     return id;
+  }
+
+  private queuePlace(parent: string): string {
+    const { created_at } = this.db.prepare("SELECT created_at FROM cards WHERE id = ?").get(parent) as { created_at: string };
+    const { n } = this.db.prepare("SELECT count(*) AS n FROM cards WHERE parent = ?").get(parent) as { n: number };
+    return `${created_at}~${n}`;
   }
 
   getCard(id: string): CardRow {

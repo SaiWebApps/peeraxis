@@ -232,3 +232,16 @@ test("accept moves main forward to the feature and removes the empty waiting bra
   assert.equal(git(t.root, "rev-parse", WAITING), git(t.root, "rev-parse", "main"));
   assert.equal(t.store.getCard(other).state, "rejected");
 });
+
+test("the parts of a split card run before cards approved after it", async () => {
+  const s = setup();
+  const first = s.store.approve(s.root, CARD);
+  await new Promise((r) => setTimeout(r, 5));
+  const later = s.store.approve(s.root, { ...CARD, title: "Later card" });
+  s.store.move(first, "testing");
+  s.store.move(first, "building");
+  s.store.move(first, "split");
+  const part = s.store.approve(s.root, { ...CARD, title: "Part one" }, first);
+  assert.equal(s.store.next()?.id, part);
+  assert.ok(later);
+});
