@@ -1,0 +1,4 @@
+#!/bin/sh
+# Public repo: refuse to push if any commit contains a secret.
+command -v gitleaks >/dev/null 2>&1 || PATH="$HOME/.local/bin:$PATH"
+gitleaks git --redact --no-banner . || { echo "Push refused: gitleaks found a possible secret." >&2; exit 1; }
