@@ -72,3 +72,30 @@ test("the page rejects a waiting feature with one sentence of why and shows it",
   assert.match(await (await fetch(`${base}/`)).text(), /Greeting says hello<\/h2> <span class="badge stopped">Rejected<\/span><\/div>\n  <p class="reason">The greeting should be &lt;warmer&gt;<\/p>/);
   assert.match(await (await fetch(`${base}/`)).text(), /Import contacts from a file<\/h2> <span class="badge stopped">Stopped<\/span><\/div>\n  <p class="reason">Parked: the project&#39;s own check fails before any change, so nothing was built\.<\/p>/);
 });
+
+test("the page shows a drafted card under Needs your yes and approving queues it", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "pxhome-"));
+  const seed = JSON.parse(execFileSync(process.execPath, [join(import.meta.dirname, "seed.ts")], { env: { ...process.env, PEERAXIS_HOME: home }, encoding: "utf8" }));
+  const store = new Store(join(home, "peeraxis.sqlite"));
+  const port = await freePort();
+  const server = serve(store, port);
+  t.after(() => server.close());
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${port}`;
+
+  const page = await (await fetch(`${base}/`)).text();
+  assert.match(page, /Needs your yes<\/h2>\n<article class="feature draft" data-card="[^"]+" data-state="draft"><h2>Show the date each feature finished<\/h2>/);
+  assert.match(page, /Finished features do not say when they finished\./);
+  assert.match(page, /<li>See &quot;Title is bold&quot; say it was accepted today<\/li>/);
+  assert.ok(page.indexOf("Needs your yes") < page.indexOf("Greeting says hello"));
+
+  const approved = await fetch(`${base}/cards/${seed.draft}/approve`, { method: "POST", headers: { Origin: base }, redirect: "manual" });
+  assert.equal(approved.status, 303);
+  assert.equal(store.getCard(seed.draft).state, "approved");
+  const after = await (await fetch(`${base}/`)).text();
+  assert.doesNotMatch(after, /Needs your yes/);
+  assert.match(after, /Show the date each feature finished<\/h2> <span class="badge queued">Queued/);
+
+  const again = await fetch(`${base}/cards/${seed.draft}/approve`, { method: "POST", headers: { Origin: base }, redirect: "manual" });
+  assert.equal(again.status, 409);
+});

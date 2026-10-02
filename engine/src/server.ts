@@ -1,4 +1,5 @@
-// The local page: every feature with where it is; one waiting for a verdict also shows its
+// The local page: drafted cards waiting for the owner's yes, each with an Approve button, then
+// every feature with where it is; one waiting for a verdict also shows its
 // recording, an Accept button, and a quieter Reject that asks for one sentence of why.
 // Only this machine may use it: requests must name 127.0.0.1/localhost as Host (and Origin, if
 // sent), so a website that rebinds its own name to 127.0.0.1 cannot read cards or accept them.
@@ -58,8 +59,28 @@ const WHERE: Partial<Record<CardRow["state"], [label: string, tone: string]>> = 
   parked: ["Stopped", "stopped"],
 };
 
+/** A drafted card as a short note: title, Before and After, the steps to watch, and Approve. */
+function draftNote(c: CardRow): string {
+  const steps = c.card.watch.map((s) => `<li>${escape(s)}</li>`).join("");
+  return `<article class="feature draft" data-card="${c.id}" data-state="draft"><h2>${escape(c.card.title)}</h2>
+  <p class="line"><span>Before:</span> ${escape(c.card.before)}</p>
+  <p class="line"><span>After:</span> ${escape(c.card.after)}</p>
+  <ol class="steps">${steps}</ol>
+  <form method="post" action="/cards/${c.id}/approve"><button type="submit" class="approve">Approve</button></form>
+</article>`;
+}
+
+/** Approving a draft freezes it and puts it in the queue. */
+export function approveDraft(store: Store, id: string): void {
+  const row = store.getCard(id);
+  if (row.state !== "draft") throw new Error(`"${row.card.title}" is ${row.state}, not a draft waiting for your yes.`);
+  store.move(id, "approved");
+}
+
 function page(store: Store, error: string | null): string {
-  const features = cards(store).filter((c) => WHERE[c.state]).map((c) => {
+  const all = cards(store);
+  const drafts = all.filter((c) => c.state === "draft").map(draftNote).join("\n");
+  const features = all.filter((c) => WHERE[c.state]).map((c) => {
     const [label, tone] = WHERE[c.state]!;
     const head = `<div class="row"><h2>${escape(c.card.title)}</h2> <span class="badge ${tone}">${label}</span></div>`;
     if (c.state === "rejected" || c.state === "parked") {
@@ -92,6 +113,7 @@ function page(store: Store, error: string | null): string {
 <body><main>
 <h1>Peeraxis</h1>
 ${error ? `<p class="error" role="alert">${escape(error)}</p>` : ""}
+${drafts ? `<section class="drafts" aria-labelledby="needs-yes"><h2 class="heading" id="needs-yes">Needs your yes</h2>\n${drafts}\n</section>` : ""}
 ${features || `<p class="empty">There are no features yet.</p>`}
 </main></body></html>`;
 }
@@ -143,7 +165,7 @@ export function serve(store: Store, port: number): Server {
       const html = (status: number, body: string) =>
         res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).end(body);
       const video = /^\/cards\/([0-9a-f-]{36})\/video\.webm$/.exec(url.pathname);
-      const verdict = /^\/cards\/([0-9a-f-]{36})\/(accept|reject)$/.exec(url.pathname);
+      const verdict = /^\/cards\/([0-9a-f-]{36})\/(accept|reject|approve)$/.exec(url.pathname);
       if (req.method === "GET" && url.pathname === "/") html(200, page(store, null));
       else if (req.method === "GET" && url.pathname === "/style.css") {
         res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" }).end(readFileSync(join(WEB, "style.css")));
@@ -153,7 +175,8 @@ export function serve(store: Store, port: number): Server {
         else res.writeHead(404).end();
       } else if (req.method === "POST" && verdict) {
         try {
-          if (verdict[2] === "accept") await accept(store, verdict[1]);
+          if (verdict[2] === "approve") approveDraft(store, verdict[1]);
+          else if (verdict[2] === "accept") await accept(store, verdict[1]);
           else await reject(store, verdict[1], new URLSearchParams(await body(req)).get("reason") ?? "");
         } catch (error) {
           html(409, page(store, (error as Error).message));
