@@ -79,27 +79,37 @@ function status(): void {
   for (const r of rows) console.log(`${r.state.padEnd(9)} ${JSON.parse(r.card).title}  (${r.id.slice(0, 8)}, ${r.updated_at})`);
 }
 
+/** Installs two login services: the engine (`run`) and the page the Dock app shows (`serve`, port 4477). */
 function install(): void {
-  const plist = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
-  const node = process.execPath;
-  const main = resolve(import.meta.dirname, "main.ts");
   mkdirSync(DATA, { recursive: true });
+  service(LABEL, "run", "engine.log");
+  service(`${LABEL}.page`, "serve", "page.log");
+}
+
+function service(label: string, command: string, log: string): void {
+  const plist = join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
+  const main = resolve(import.meta.dirname, "main.ts");
   writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>${LABEL}</string>
-  <key>ProgramArguments</key><array><string>${node}</string><string>${main}</string><string>run</string></array>
+  <key>Label</key><string>${label}</string>
+  <key>ProgramArguments</key><array><string>${process.execPath}</string><string>${main}</string><string>${command}</string></array>
   <key>WorkingDirectory</key><string>${resolve(import.meta.dirname, "../..")}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>${join(DATA, "engine.log")}</string>
-  <key>StandardErrorPath</key><string>${join(DATA, "engine.log")}</string>
+  <key>StandardOutPath</key><string>${join(DATA, log)}</string>
+  <key>StandardErrorPath</key><string>${join(DATA, log)}</string>
 </dict></plist>
 `);
   const domain = `gui/${process.getuid!()}`;
-  try { execFileSync("launchctl", ["bootout", `${domain}/${LABEL}`], { stdio: "ignore" }); } catch { /* not loaded */ }
+  try { execFileSync("launchctl", ["bootout", `${domain}/${label}`], { stdio: "ignore" }); } catch { /* not loaded */ }
+  // bootout returns before the old service is gone; bootstrapping too early fails with an I/O error.
+  for (let i = 0; i < 50; i++) {
+    try { execFileSync("launchctl", ["print", `${domain}/${label}`], { stdio: "ignore" }); } catch { break; }
+    execFileSync("/bin/sleep", ["0.2"]);
+  }
   execFileSync("launchctl", ["bootstrap", domain, plist]);
-  console.log(`Installed and started ${LABEL}.`);
+  console.log(`Installed and started ${label}.`);
 }
 
 const [command, ...args] = process.argv.slice(2);
