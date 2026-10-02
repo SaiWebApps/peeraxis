@@ -1,0 +1,16 @@
+{
+  "questions": [
+    {
+      "question": "Should a pinned feature stay pinned after you accept it?",
+      "recommended": "No, unpin it when accepted",
+      "options": ["No, unpin it when accepted", "Yes, keep it pinned"]
+    }
+  ],
+  "card": {
+    "title": "Pin a feature to the top",
+    "before": "Features are listed in the order they were approved.",
+    "after": "You can pin one feature so it shows first; it unpins when you accept it.",
+    "watch": ["Pin \"Farewell says goodbye\" and see it listed first"],
+    "notIncluded": ["Pinning more than one feature"]
+  }
+}

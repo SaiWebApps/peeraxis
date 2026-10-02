@@ -12,6 +12,8 @@ mkdir -p "$PEERAXIS_DEMO_OUTPUT"
 export PEERAXIS_HOME="$(mktemp -d "${TMPDIR:-/tmp}/pxhome.XXXXXX")"
 node engine/test/seed.ts >"$PEERAXIS_HOME/seed.json"
 export PEERAXIS_SEED="$PEERAXIS_HOME/seed.json"
+# Intake answers come from this script instead of a model, so tests never call one.
+export PEERAXIS_INTAKE_SCRIPT="$ROOT/engine/test/fixtures/intake.json"
 
 if ! grep -q "@playwright/test" "$PEERAXIS_DEMO_SPEC"; then
   node --test "$PEERAXIS_DEMO_SPEC"
