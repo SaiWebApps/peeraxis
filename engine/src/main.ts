@@ -109,7 +109,7 @@ else if (command === "status") status();
 else if (command === "accept" && args.length === 1) await accept(open(), find(args[0]));
 else if (command === "reject" && args.length >= 2) await reject(open(), find(args[0]), args.slice(1).join(" "));
 else if (command === "retry" && args.length >= 2) open().move(find(args[0]), "approved", { reason: args.slice(1).join(" ") });
-else if (command === "serve") serve(open(), Number(process.env.PEERAXIS_PORT ?? 4477));
+else if (command === "serve") serve(open(), Number(process.env.PEERAXIS_PORT ?? 4477), join(DATA, "models.json"));
 else if (command === "install") install();
 else if (command === "digest") console.log(dailyDigest(open()) ?? "Nothing new to send today.");
 else {

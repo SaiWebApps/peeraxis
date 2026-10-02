@@ -7,6 +7,7 @@ import { createReadStream, existsSync, readFileSync, readdirSync, statSync } fro
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { CardRow, Store } from "./db.ts";
+import { DEFAULT_MODELS, loadModels, type ModelsConfig, type Role } from "./models.ts";
 import { accept, reject } from "./verdict.ts";
 
 const WEB = join(import.meta.dirname, "../../web");
@@ -77,6 +78,36 @@ export function approveDraft(store: Store, id: string): void {
   store.move(id, "approved");
 }
 
+/** Each job in the owner's words, in the order the work happens. */
+const JOBS: [Role, string][] = [
+  ["intake", "Asks you questions"],
+  ["cardCheck", "Checks the test matches the card"],
+  ["builder", "Builds"],
+  ["testAuthor", "Writes the hidden test"],
+  ["reviewer", "Reviews the change"],
+  ["lookReviewer", "Reviews how it looks"],
+  ["splitter", "Splits stuck work"],
+];
+
+/** The Models page: each job on the left, the model doing it on the right. */
+export function modelsPage(config: ModelsConfig): string {
+  const rows = JOBS.map(([role, job]) => {
+    const model = config.roles[role]?.[0]?.id ?? "None";
+    return `<div class="job" data-role="${role}"><dt>${escape(job)}</dt><dd>${escape(model)}</dd></div>`;
+  }).join("\n");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Models · Peeraxis</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<p class="back"><a href="/">← Peeraxis</a></p>
+<h1>Models</h1>
+<dl class="models">
+${rows}
+</dl>
+</main></body></html>`;
+}
+
 function page(store: Store, error: string | null): string {
   const all = cards(store);
   const drafts = all.filter((c) => c.state === "draft").map(draftNote).join("\n");
@@ -111,7 +142,7 @@ function page(store: Store, error: string | null): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/style.css"></head>
 <body><main>
-<h1>Peeraxis</h1>
+<div class="row top"><h1>Peeraxis</h1> <a href="/models">Models</a></div>
 ${error ? `<p class="error" role="alert">${escape(error)}</p>` : ""}
 ${drafts ? `<section class="drafts" aria-labelledby="needs-yes"><h2 class="heading" id="needs-yes">Needs your yes</h2>\n${drafts}\n</section>` : ""}
 ${features || `<p class="empty">There are no features yet.</p>`}
@@ -154,7 +185,7 @@ export function trusted(req: IncomingMessage, port: number): boolean {
   return [...hosts].some((h) => origin === `http://${h}`);
 }
 
-export function serve(store: Store, port: number): Server {
+export function serve(store: Store, port: number, modelsFile?: string): Server {
   const server = createServer(async (req, res) => {
     try {
       if (!trusted(req, port)) {
@@ -167,6 +198,7 @@ export function serve(store: Store, port: number): Server {
       const video = /^\/cards\/([0-9a-f-]{36})\/video\.webm$/.exec(url.pathname);
       const verdict = /^\/cards\/([0-9a-f-]{36})\/(accept|reject|approve)$/.exec(url.pathname);
       if (req.method === "GET" && url.pathname === "/") html(200, page(store, null));
+      else if (req.method === "GET" && url.pathname === "/models") html(200, modelsPage(modelsFile ? loadModels(modelsFile) : DEFAULT_MODELS));
       else if (req.method === "GET" && url.pathname === "/style.css") {
         res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" }).end(readFileSync(join(WEB, "style.css")));
       } else if (req.method === "GET" && video) {

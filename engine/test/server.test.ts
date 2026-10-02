@@ -99,3 +99,22 @@ test("the page shows a drafted card under Needs your yes and approving queues it
   const again = await fetch(`${base}/cards/${seed.draft}/approve`, { method: "POST", headers: { Origin: base }, redirect: "manual" });
   assert.equal(again.status, 409);
 });
+
+test("the Models page, linked from the main page, lists each job with the model doing it", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "pxhome-"));
+  execFileSync(process.execPath, [join(import.meta.dirname, "seed.ts")], { env: { ...process.env, PEERAXIS_HOME: home }, encoding: "utf8" });
+  const store = new Store(join(home, "peeraxis.sqlite"));
+  const port = await freePort();
+  const server = serve(store, port, join(home, "models.json"));
+  t.after(() => server.close());
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${port}`;
+
+  assert.match(await (await fetch(`${base}/`)).text(), /<a href="\/models">Models<\/a>/);
+  const page = await (await fetch(`${base}/models`)).text();
+  assert.match(page, /<dt>Builds<\/dt><dd>claude-opus-5-5<\/dd>/);
+  assert.match(page, /<dt>Writes the hidden test<\/dt><dd>gpt-6-astra<\/dd>/);
+  for (const job of ["Asks you questions", "Checks the test matches the card", "Reviews the change", "Reviews how it looks", "Splits stuck work"]) {
+    assert.ok(page.includes(`<dt>${job}</dt>`), job);
+  }
+});
