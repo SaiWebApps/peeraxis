@@ -78,7 +78,7 @@ function page(store: Store, error: string | null): string {
     <div class="verdict">
       <form method="post" action="/cards/${c.id}/accept"><button type="submit">Accept</button></form>
       <form class="reject" method="post" action="/cards/${c.id}/reject">
-        <input type="text" name="reason" required maxlength="300" placeholder="Why reject? One sentence" aria-label="Why reject ${escape(c.card.title)}">
+        <input type="text" name="reason" required maxlength="300" placeholder="Why reject? One sentence." aria-label="Why reject ${escape(c.card.title)}">
         <button type="submit">Reject</button>
       </form>
     </div>

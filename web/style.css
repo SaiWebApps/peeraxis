@@ -9,7 +9,7 @@ h1 { font-size: 22px; margin: 0 0 16px; }
 .after { margin: 4px 0 16px; color: #424245; }
 .watch { display: flex; align-items: flex-start; gap: 20px; }
 .watch video { flex: 1; min-width: 0; width: 100%; max-height: 640px; background: #000; border-radius: 8px; }
-.verdict { flex: none; display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 220px; }
+.verdict { flex: none; display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 300px; }
 .verdict > form:not(.reject) > button { width: 100%; font: inherit; font-weight: 600; font-size: 17px; padding: 12px 32px; border: 0; border-radius: 10px; background: #0071e3; color: #fff; cursor: pointer; }
 .verdict > form:not(.reject) > button:hover { background: #0077ed; }
 .verdict > .reject { display: flex; gap: 6px; }
