@@ -10,7 +10,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from "node:path";
 import type { CardRow, Store } from "./db.ts";
 import { defaultIntake, type Intake, type Question } from "./intake.ts";
-import { DEFAULT_MODELS, loadModels, type ModelsConfig, type Role } from "./models.ts";
+import { DEFAULT_MODELS, KNOWN_MODELS, loadModels, saveModels, withModel, type ModelsConfig, type Role } from "./models.ts";
 import { accept, reject } from "./verdict.ts";
 
 const WEB = join(import.meta.dirname, "../../web");
@@ -92,11 +92,15 @@ const JOBS: [Role, string][] = [
   ["splitter", "Splits stuck work"],
 ];
 
-/** The Models page: each job on the left, the model doing it on the right. */
-export function modelsPage(config: ModelsConfig): string {
+/** The Models page: each job on the left, a small dropdown of the model doing it on the right. */
+export function modelsPage(config: ModelsConfig, refused?: { role: Role; message: string }): string {
   const rows = JOBS.map(([role, job]) => {
     const model = config.roles[role]?.[0]?.id ?? "None";
-    return `<div class="job" data-role="${role}"><dt>${escape(job)}</dt><dd>${escape(model)}</dd></div>`;
+    const options = KNOWN_MODELS.map((m) => `<option${m.id === model ? " selected" : ""}>${escape(m.id)}</option>`).join("");
+    const why = refused?.role === role ? `\n  <p class="refused" role="alert">${escape(refused.message)}</p>` : "";
+    return `<div class="job" data-role="${role}"><dt>${escape(job)}</dt><dd><form method="post" action="/models/${role}">
+    <span class="model">${escape(model)}</span><select name="model" aria-label="${escape(job)}" onchange="this.form.submit()">${options}</select>
+  </form>${why}</dd></div>`;
   }).join("\n");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Models · Peeraxis</title>
@@ -238,6 +242,7 @@ export function serve(store: Store, port: number, modelsFile?: string, intake: I
       const video = /^\/cards\/([0-9a-f-]{36})\/video\.webm$/.exec(url.pathname);
       const verdict = /^\/cards\/([0-9a-f-]{36})\/(accept|reject|approve)$/.exec(url.pathname);
       const answer = /^\/intake\/([0-9a-f-]{36})$/.exec(url.pathname);
+      const job = new RegExp(`^/models/(${JOBS.map(([r]) => r).join("|")})$`).exec(url.pathname);
       if (req.method === "GET" && url.pathname === "/") html(200, page(store, null, chats.get(url.searchParams.get("intake") ?? "") ?? null));
       else if (req.method === "POST" && url.pathname === "/intake") {
         const sentence = (new URLSearchParams(await body(req)).get("sentence") ?? "").trim();
@@ -290,6 +295,19 @@ export function serve(store: Store, port: number, modelsFile?: string, intake: I
         res.writeHead(303, { Location: "/" }).end();
       }
       else if (req.method === "GET" && url.pathname === "/models") html(200, modelsPage(modelsFile ? loadModels(modelsFile) : DEFAULT_MODELS));
+      else if (req.method === "POST" && job) {
+        const role = job[1] as Role;
+        const config = modelsFile ? loadModels(modelsFile) : DEFAULT_MODELS;
+        try {
+          if (!modelsFile) throw new Error("There is no models file to save to.");
+          // Saved to models.json, which the engine reads again before each step.
+          saveModels(modelsFile, withModel(config, role, new URLSearchParams(await body(req)).get("model") ?? ""));
+        } catch (error) {
+          html(409, modelsPage(config, { role, message: (error as Error).message }));
+          return;
+        }
+        res.writeHead(303, { Location: "/models" }).end();
+      }
       else if (req.method === "GET" && url.pathname === "/style.css") {
         res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" }).end(readFileSync(join(WEB, "style.css")));
       } else if (req.method === "GET" && video) {

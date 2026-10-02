@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { Store } from "../src/db.ts";
 import { serve } from "../src/server.ts";
 import { scriptedIntake, type Intake } from "../src/intake.ts";
+import { DEFAULT_MODELS, loadModels, saveModels, withModel } from "../src/models.ts";
 
 async function freePort(): Promise<number> {
   const s = createServer();
@@ -113,11 +114,40 @@ test("the Models page, linked from the main page, lists each job with the model 
 
   assert.match(await (await fetch(`${base}/`)).text(), /<a href="\/models">Models<\/a>/);
   const page = await (await fetch(`${base}/models`)).text();
-  assert.match(page, /<dt>Builds<\/dt><dd>claude-opus-5-5<\/dd>/);
-  assert.match(page, /<dt>Writes the hidden test<\/dt><dd>gpt-6-astra<\/dd>/);
+  assert.match(page, /<dt>Builds<\/dt><dd>[^]*?<span class="model">claude-opus-5-5<\/span>/);
+  assert.match(page, /<dt>Writes the hidden test<\/dt><dd>[^]*?<span class="model">gpt-6-astra<\/span>/);
   for (const job of ["Asks you questions", "Checks the test matches the card", "Reviews the change", "Reviews how it looks", "Splits stuck work"]) {
     assert.ok(page.includes(`<dt>${job}</dt>`), job);
   }
+});
+
+test("a job's model can be changed on the Models page, but never to its checker's family", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "pxhome-"));
+  execFileSync(process.execPath, [join(import.meta.dirname, "seed.ts")], { env: { ...process.env, PEERAXIS_HOME: home }, encoding: "utf8" });
+  const store = new Store(join(home, "peeraxis.sqlite"));
+  const file = join(home, "models.json");
+  // Even with same-family checks allowed for running, the Models page refuses such a change.
+  saveModels(file, { ...loadModels(file), allowSameFamilyChecks: true });
+  const port = await freePort();
+  const server = serve(store, port, file);
+  t.after(() => server.close());
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${port}`;
+  const post = (model: string) =>
+    fetch(`${base}/models/builder`, { method: "POST", headers: { Origin: base }, body: new URLSearchParams({ model }), redirect: "manual" });
+
+  assert.equal((await post("claude-fable-5-1")).status, 303);
+  assert.equal(loadModels(file).roles.builder[0].id, "claude-fable-5-1");
+  assert.match(await (await fetch(`${base}/models`)).text(), /<dt>Builds<\/dt><dd>[^]*?<span class="model">claude-fable-5-1<\/span>/);
+
+  const refused = await post("gpt-6-sol");
+  assert.equal(refused.status, 409);
+  const text = await refused.text();
+  assert.ok(text.includes("The builder and its checker can&#39;t be from the same family."));
+  assert.match(text, /<dt>Builds<\/dt><dd>[^]*?<span class="model">claude-fable-5-1<\/span>/);
+  assert.equal(loadModels(file).roles.builder[0].id, "claude-fable-5-1");
+  assert.throws(() => withModel(DEFAULT_MODELS, "reviewer", "claude-opus-5-5"), /same family/);
+  assert.equal((await post("opus")).status, 409);
 });
 
 test("one typed sentence asks the scripted question and drafts the card under Needs your yes", async (t) => {

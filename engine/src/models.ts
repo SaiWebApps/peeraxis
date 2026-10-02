@@ -49,6 +49,36 @@ export function loadModels(file: string): ModelsConfig {
   return config;
 }
 
+/** Every model a job can be switched to on the Models page. */
+export const KNOWN_MODELS: Model[] = [opus, fable, astra, sol];
+
+/** Jobs that check each other's work, so their main models must come from different families. */
+const CHECKS: [Role, Role][] = [
+  ["builder", "testAuthor"],
+  ["cardCheck", "testAuthor"],
+  ["reviewer", "builder"],
+  ["lookReviewer", "builder"],
+];
+
+export const SAME_FAMILY = "The builder and its checker can't be from the same family.";
+
+/**
+ * The config with `id` as the main model for `role`, the other models staying as backups.
+ * Refuses a change that puts a job and its checker in one family, whatever allowSameFamilyChecks says.
+ */
+export function withModel(config: ModelsConfig, role: Role, id: string): ModelsConfig {
+  const model = KNOWN_MODELS.find((m) => m.id === id);
+  if (!model || !(role in config.roles)) throw new Error("Pick one of the offered models.");
+  assertAllowed(model);
+  const roles = { ...config.roles, [role]: [model, ...config.roles[role].filter((m) => m.id !== id)] };
+  if (CHECKS.some(([a, b]) => (a === role || b === role) && roles[a]?.[0] && roles[a][0].family === roles[b]?.[0]?.family)) throw new Error(SAME_FAMILY);
+  return { ...config, roles };
+}
+
+export function saveModels(file: string, config: ModelsConfig): void {
+  writeFileSync(file, JSON.stringify(config, null, 2));
+}
+
 /** Usage limits currently hit: model id or family name → when it is expected back (ms since epoch). */
 export type Limits = Record<string, number>;
 

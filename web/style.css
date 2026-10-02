@@ -40,7 +40,12 @@ a:hover { text-decoration: underline; }
 .models .job { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid #ececf0; }
 .models .job:first-child { border-top: 0; }
 .models dt { color: #1d1d1f; }
-.models dd { margin: 0; color: #424245; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+.models dd { margin: 0; color: #424245; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; text-align: right; }
+.models form { position: relative; display: inline-block; margin: 0; padding: 2px 22px 2px 8px; border: 1px solid #d2d2d7; border-radius: 6px; background: #fff; }
+.models form::after { content: "▾"; position: absolute; right: 7px; top: 2px; color: #6e6e73; pointer-events: none; }
+.models form:focus-within { border-color: #0071e3; }
+.models select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; font: inherit; }
+.models .refused { margin: 4px 0 0; color: #b3261e; font-family: -apple-system, system-ui, sans-serif; }
 .intake { display: flex; gap: 8px; margin: 0 0 16px; }
 .intake input { flex: 1; min-width: 0; font: inherit; padding: 10px 14px; border: 1px solid #d2d2d7; border-radius: 10px; background: #fff; }
 .intake button { flex: none; font: inherit; font-weight: 600; padding: 10px 20px; border: 0; border-radius: 10px; background: #0071e3; color: #fff; cursor: pointer; }
