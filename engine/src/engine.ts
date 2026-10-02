@@ -304,9 +304,13 @@ export class Engine {
   private async lookReview(row: CardRow, attempt: number, builderFamily: Family): Promise<string[]> {
     if (!row.card.look) return [];
     const dir = this.cardDir(row.id, "evidence", `attempt-${attempt}`);
-    const shots = (readdirSync(dir, { recursive: true }) as string[])
-      .filter((f) => f.endsWith(".png")).map((f) => join(dir, f))
-      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs).slice(0, 6);
+    const pngs = (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith(".png"));
+    // Prefer one screenshot per watched step (step-1.png, ...); the end-of-test shot alone misleads
+    // a look review of anything the steps change (run e532f7bc judged a draft that was already approved).
+    const steps = pngs.filter((f) => /(^|\/)step-\d+\.png$/.test(f))
+      .sort((a, b) => Number(/step-(\d+)/.exec(a)![1]) - Number(/step-(\d+)/.exec(b)![1]));
+    const shots = (steps.length ? steps : pngs).map((f) => join(dir, f))
+      .sort((a, b) => (steps.length ? 0 : statSync(b).mtimeMs - statSync(a).mtimeMs)).slice(0, 8);
     if (!shots.length) {
       this.deps.store.event(row.id, "look.skipped", { reason: "the acceptance run left no screenshots" });
       return [];
@@ -314,7 +318,7 @@ export class Engine {
     for (;;) {
       const reviewer = this.choose(row.id, "lookReviewer", builderFamily);
       const result = await this.ask(row.id, "lookReviewer", reviewer, {
-        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: shots, prompt: jobs.lookPrompt(row.card),
+        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: shots, prompt: jobs.lookPrompt(row.card, steps.length > 0),
       });
       if (result.limitUntil) continue;
       const verdict = result.json as { verdict: string; findings: { blocking: boolean; text: string }[] } | undefined;

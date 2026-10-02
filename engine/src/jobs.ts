@@ -34,6 +34,8 @@ export function testAuthorPrompt(card: Card, testFile: string, example: string |
     "- Find things the way a person would: by role and visible name (a button called Reject, a heading,",
     "  a label's text). Never depend on page structure such as ancestors, CSS classes or element order.",
     "- Any implementation a reasonable person would accept from this card must pass the test.",
+    "- If the test drives a screen, save a screenshot at the end of every watched step, named step-1.png,",
+    "  step-2.png, ... in the test's output folder (Playwright: page.screenshot({ path: test.info().outputPath('step-1.png') })).",
     ...(example ? [`- Follow the structure and helpers of the existing test ${example}.`] : []),
     ...(notes ? ["", "How acceptance tests run in this project:", notes] : []),
     "",
@@ -133,9 +135,13 @@ export function reviewPrompt(card: Card, diffText: string, proof: string): strin
   ].join("\n");
 }
 
-export function lookPrompt(card: Card): string {
+export function lookPrompt(card: Card, stepShots: boolean): string {
   return [
     "Look at these screenshots of a finished feature and judge how it looks, for the person who will use it.",
+    stepShots
+      ? "Screenshot step-N.png shows the screen at the end of watched step N, in order."
+      : "The screenshots show the screen at the end of the test, after every watched step has happened.",
+    "Judge only what this card adds or changes on the screen; the rest of the page is out of scope.",
     "Judge against the look brief and these plain problems only: text that is cut off or overlaps, things that",
     "are hard to read, clutter or crowding, the main thing not standing out, or a mismatch with the brief.",
     "Mark a finding blocking only if a person would notice it straight away. Each finding is one plain sentence",
