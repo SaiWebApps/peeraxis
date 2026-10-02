@@ -22,12 +22,24 @@ function open(): Store {
   return new Store(join(DATA, "peeraxis.sqlite"));
 }
 
+/** True if `pid` is alive and is a Peeraxis engine (`main.ts run`), not some reused id. */
+export function engineRunning(pid: number): boolean {
+  if (!pid || pid === process.pid) return false;
+  try {
+    const command = execFileSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+    return /main\.ts run\b/.test(command);
+  } catch {
+    return false;
+  }
+}
+
 async function run(): Promise<void> {
   const lock = join(DATA, "engine.pid");
   mkdirSync(DATA, { recursive: true });
   if (existsSync(lock)) {
     const pid = Number(readFileSync(lock, "utf8"));
-    try { process.kill(pid, 0); console.error(`Engine already running (pid ${pid}).`); process.exit(1); } catch { /* stale */ }
+    // After a restart the old id may belong to an unrelated process, so check what it runs.
+    if (engineRunning(pid)) { console.error(`Engine already running (pid ${pid}).`); process.exit(1); }
   }
   writeFileSync(lock, String(process.pid));
   const store = open();

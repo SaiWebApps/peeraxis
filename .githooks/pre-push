@@ -1,4 +1,5 @@
 #!/bin/sh
 # Public repo: refuse to push if any commit contains a secret.
-command -v gitleaks >/dev/null 2>&1 || PATH="$HOME/.local/bin:$PATH"
+PATH="$HOME/Library/Application Support/Peeraxis Engine/bin:$HOME/.local/bin:$PATH"
+command -v gitleaks >/dev/null 2>&1 || { echo "Push refused: the gitleaks secret scanner is not installed." >&2; exit 1; }
 gitleaks git --redact --no-banner . || { echo "Push refused: gitleaks found a possible secret." >&2; exit 1; }

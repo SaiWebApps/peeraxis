@@ -94,3 +94,22 @@ test("code health: more warnings, new dependencies, big files and a slower check
   assert.equal(worse(before, after, false).length, 4);
   assert.equal(worse(before, after, true).length, 3);
 });
+
+test("a stale engine lock naming an unrelated process does not stop the engine starting", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const home = mkdtempSync(join(tmpdir(), "px-home-"));
+  writeFileSync(join(home, "engine.pid"), String(process.ppid || 1)); // alive, but not an engine
+  const main = join(import.meta.dirname, "../src/main.ts");
+  // `status` would not touch the lock; start `run` briefly and look for the started event.
+  let err = "";
+  try {
+    execFileSync(process.execPath, [main, "run"], { env: { ...process.env, PEERAXIS_HOME: home }, timeout: 5000, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    err = String((error as { stderr?: Buffer }).stderr ?? "");
+  }
+  assert.doesNotMatch(err, /already running/);
+  const { Store } = await import("../src/db.ts");
+  const kinds = new Store(join(home, "peeraxis.sqlite")).db.prepare("SELECT kind FROM events").all() as { kind: string }[];
+  assert.ok(kinds.some((k) => k.kind === "engine.started"));
+});
