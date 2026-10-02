@@ -181,6 +181,7 @@ export class Engine {
     const allowed = row.card.allowedPaths ?? plugin.allowedPaths;
     const facts: string[] = [];
     let reviewUsed = false;
+    let lookUsed = false;
     const baseline = await this.baseline(row, plugin);
 
     for (let attempt = 1; attempt <= TRIES; attempt++) {
@@ -210,6 +211,15 @@ export class Engine {
           attempt--; // a review fix is not a failed try
           continue;
         }
+        const look = await this.lookReview(row, attempt, builder.family);
+        if (look.length && !lookUsed) {
+          lookUsed = true;
+          facts.push(...look.map((f) => `Look: ${f}`));
+          this.deps.store.move(row.id, "building", { reason: "look findings", findings: look });
+          attempt--; // a look fix is not a failed try
+          continue;
+        }
+        if (look.length) this.deps.store.event(row.id, "look.notes", { notes: look }); // the owner has the final say on looks
         if (!landOnWaiting(row.project, copy, candidate, waitingTip)) {
           this.deps.store.move(row.id, "building", { reason: "the waiting branch moved; rebuilding on top of it" });
           attempt--;
@@ -286,6 +296,33 @@ export class Engine {
       const verdict = result.json as { verdict: string; findings: { blocking: boolean; text: string }[] } | undefined;
       if (!result.ok || !verdict) throw new Park("The review could not be completed.");
       this.deps.store.event(row.id, "review.done", { verdict: verdict.verdict, findings: verdict.findings, testFile: test.testFile });
+      return verdict.verdict === "fix" ? verdict.findings.filter((f) => f.blocking).map((f) => f.text) : [];
+    }
+  }
+
+  /** For cards with a look brief: a fresh model from another family judges the screenshots. */
+  private async lookReview(row: CardRow, attempt: number, builderFamily: Family): Promise<string[]> {
+    if (!row.card.look) return [];
+    const dir = this.cardDir(row.id, "evidence", `attempt-${attempt}`);
+    const shots = (readdirSync(dir, { recursive: true }) as string[])
+      .filter((f) => f.endsWith(".png")).map((f) => join(dir, f))
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs).slice(0, 6);
+    if (!shots.length) {
+      this.deps.store.event(row.id, "look.skipped", { reason: "the acceptance run left no screenshots" });
+      return [];
+    }
+    for (;;) {
+      const reviewer = this.choose(row.id, "lookReviewer", builderFamily);
+      const result = await this.ask(row.id, "lookReviewer", reviewer, {
+        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: shots, prompt: jobs.lookPrompt(row.card),
+      });
+      if (result.limitUntil) continue;
+      const verdict = result.json as { verdict: string; findings: { blocking: boolean; text: string }[] } | undefined;
+      if (!result.ok || !verdict) {
+        this.deps.store.event(row.id, "look.skipped", { reason: "the look review could not be completed" });
+        return [];
+      }
+      this.deps.store.event(row.id, "look.done", { verdict: verdict.verdict, findings: verdict.findings });
       return verdict.verdict === "fix" ? verdict.findings.filter((f) => f.blocking).map((f) => f.text) : [];
     }
   }

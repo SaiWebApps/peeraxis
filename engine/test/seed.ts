@@ -56,4 +56,12 @@ walk(accepted, ["testing", "building", "checking"]);
 store.move(accepted, "waiting", { sha: git("rev-parse", "main"), builder: "claude-opus-5-5" });
 store.move(accepted, "accepted", { sha: git("rev-parse", "main"), main: "main" });
 
-console.log(JSON.stringify({ project, waiting, building, parked, accepted }));
+const draft = store.draft(project, {
+  title: "Show the date each feature finished",
+  before: "Finished features do not say when they finished.",
+  after: "Each accepted feature shows the date it was accepted.",
+  watch: ["See \"Title is bold\" say it was accepted today"],
+  notIncluded: ["Times of day"],
+});
+
+console.log(JSON.stringify({ project, waiting, building, parked, accepted, draft }));

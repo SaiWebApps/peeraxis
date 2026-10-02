@@ -17,6 +17,7 @@ export type AgentRun = {
   write: boolean; // may the agent change files in cwd?
   schema?: Record<string, unknown>; // ask for a JSON answer in this shape
   canUseTool?: CanUseTool; // Claude only: decides every tool call
+  images?: string[]; // screenshots the model should look at (absolute paths inside cwd)
 };
 
 export type AgentResult = {
@@ -43,8 +44,11 @@ async function runClaude(run: AgentRun): Promise<AgentResult> {
   let limitUntil: number | undefined;
   let final: Extract<SDKMessage, { type: "result" }> | undefined;
   try {
+    const prompt = run.images?.length
+      ? `${run.prompt}\n\nRead each of these screenshots before answering:\n${run.images.join("\n")}`
+      : run.prompt;
     const messages = query({
-      prompt: run.prompt,
+      prompt,
       options: {
         model: run.model.id,
         cwd: run.cwd,
@@ -105,7 +109,10 @@ async function runCodex(run: AgentRun): Promise<AgentResult> {
       webSearchMode: "disabled",
       networkAccessEnabled: false,
     });
-    const turn = await thread.run(run.prompt, { signal: abort.signal, ...(run.schema ? { outputSchema: run.schema } : {}) });
+    const input = run.images?.length
+      ? [{ type: "text" as const, text: run.prompt }, ...run.images.map((path) => ({ type: "local_image" as const, path }))]
+      : run.prompt;
+    const turn = await thread.run(input, { signal: abort.signal, ...(run.schema ? { outputSchema: run.schema } : {}) });
     const text = redact(turn.finalResponse);
     let json: unknown;
     if (run.schema) {

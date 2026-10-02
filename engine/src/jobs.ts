@@ -133,6 +133,19 @@ export function reviewPrompt(card: Card, diffText: string, proof: string): strin
   ].join("\n");
 }
 
+export function lookPrompt(card: Card): string {
+  return [
+    "Look at these screenshots of a finished feature and judge how it looks, for the person who will use it.",
+    "Judge against the look brief and these plain problems only: text that is cut off or overlaps, things that",
+    "are hard to read, clutter or crowding, the main thing not standing out, or a mismatch with the brief.",
+    "Mark a finding blocking only if a person would notice it straight away. Each finding is one plain sentence",
+    "saying what is wrong where, e.g. \"The Reject box's hint text is cut off.\" No code advice.",
+    "Say 'fix' only if at least one finding is blocking.",
+    "",
+    cardText(card),
+  ].join("\n");
+}
+
 export const SPLIT_SCHEMA = {
   type: "object",
   additionalProperties: false,

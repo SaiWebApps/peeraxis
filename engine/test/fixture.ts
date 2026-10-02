@@ -23,7 +23,7 @@ export function project(): string {
     "app.js": 'export const greet = () => "hi";\n',
     "tests/unit.test.js": 'import { test } from "node:test";\ntest("ok", () => {});\n',
     "check.sh": "node --test tests/ >/dev/null\n",
-    "acceptance.sh": 'node --test "$PEERAXIS_DEMO_SPEC" && echo "{\\"ok\\":true}" > "$PEERAXIS_DEMO_OUTPUT/report.json"\n',
+    "acceptance.sh": `node --test "$PEERAXIS_DEMO_SPEC" && echo '{"ok":true}' > "$PEERAXIS_DEMO_OUTPUT/report.json" && cp "${join(import.meta.dirname, "fixtures", "sample.png")}" "$PEERAXIS_DEMO_OUTPUT/shot.png"\n`,
     ".peeraxis/project.json": JSON.stringify({
       setup: "true",
       check: "sh check.sh",
@@ -46,7 +46,7 @@ export function project(): string {
   return root;
 }
 
-export type Script = Partial<Record<"testAuthor" | "cardCheck" | "builder" | "reviewer" | "splitter", (run: AgentRun, call: number) => AgentResult | Promise<AgentResult>>>;
+export type Script = Partial<Record<"testAuthor" | "cardCheck" | "builder" | "reviewer" | "lookReviewer" | "splitter", (run: AgentRun, call: number) => AgentResult | Promise<AgentResult>>>;
 
 export const GOOD_TEST = 'import { test } from "node:test";\nimport assert from "node:assert";\nimport { greet } from "../app.js";\ntest("Call the greeting and see hello", () => assert.equal(greet(), "hello"));\n';
 
@@ -63,6 +63,7 @@ export const DEFAULT_SCRIPT: Required<Script> = {
     return { ok: true, text: "done" };
   },
   reviewer: () => ({ ok: true, text: "", json: { verdict: "pass", findings: [] } }),
+  lookReviewer: () => ({ ok: true, text: "", json: { verdict: "pass", findings: [] } }),
   splitter: () => ({ ok: true, text: "", json: { decision: "park", sentence: "Parked by the splitter.", cards: [] } }),
 };
 
@@ -71,6 +72,7 @@ export function roleOf(prompt: string): keyof Script {
   if (prompt.startsWith("Check whether this acceptance test")) return "cardCheck";
   if (prompt.startsWith("Build this feature")) return "builder";
   if (prompt.startsWith("Review this change")) return "reviewer";
+  if (prompt.startsWith("Look at these screenshots")) return "lookReviewer";
   return "splitter";
 }
 

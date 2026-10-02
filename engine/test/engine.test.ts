@@ -286,3 +286,30 @@ test("when main moves while features wait, they are replayed on top and can stil
   assert.equal(s.store.getCard(first).state, "accepted");
   assert.match(git(s.root, "log", "--format=%s", "-2", "main"), /Greeting says hello\nowner work/);
 });
+
+test("the look review sends cluttered screens back once, then lands with any remaining notes for the owner", async () => {
+  const s = setup({
+    lookReviewer: (run) => {
+      assert.ok(run.images?.length, "no screenshots given");
+      return { ok: true, text: "", json: { verdict: "fix", findings: [{ blocking: true, text: "The Reject box's hint text is cut off." }] } };
+    },
+    builder: (run, call) => {
+      if (call === 2) assert.match(run.prompt, /Look: The Reject box's hint text is cut off/);
+      return DEFAULT_SCRIPT.builder(run, call);
+    },
+  });
+  const id = s.store.approve(s.root, { ...CARD, look: "A calm page." });
+  await s.engine.step();
+  assert.equal(s.store.getCard(id).state, "waiting");
+  assert.equal(s.calls.filter((c) => c.role === "builder").length, 2);
+  const notes = s.store.events(id).find((e) => e.kind === "look.notes");
+  assert.deepEqual(notes?.data.notes, ["The Reject box's hint text is cut off."]);
+  assert.equal(s.calls.find((c) => c.role === "lookReviewer")?.model, "gpt-6-astra");
+});
+
+test("cards without a look brief skip the look review", async () => {
+  const s = setup({ lookReviewer: () => assert.fail("look review ran") });
+  const id = s.store.approve(s.root, CARD);
+  await s.engine.step();
+  assert.equal(s.store.getCard(id).state, "waiting");
+});

@@ -100,6 +100,18 @@ export class Store {
     return `${created_at}~${n}`;
   }
 
+  /** A card drafted at intake, not yet approved by the owner. It is frozen only when approved. */
+  draft(project: string, card: Card): string {
+    const problem = validateCard(card);
+    if (problem) throw new Error(problem);
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db.prepare("INSERT INTO cards VALUES (?, ?, NULL, ?, ?, 'draft', ?, ?)")
+      .run(id, project, JSON.stringify(card), cardHash(card), now, now);
+    this.event(id, "card.drafted", { title: card.title });
+    return id;
+  }
+
   getCard(id: string): CardRow {
     const row = this.db.prepare("SELECT * FROM cards WHERE id = ?").get(id) as Record<string, string> | undefined;
     if (!row) throw new Error(`No card ${id}`);
