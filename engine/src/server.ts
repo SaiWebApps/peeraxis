@@ -1,12 +1,15 @@
-// The local page: drafted cards waiting for the owner's yes, each with an Approve button, then
+// The local page: a one-line box for describing a new feature, then a short chat of intake
+// questions while one is being drafted; drafted cards waiting for the owner's yes, each with an Approve button, then
 // every feature with where it is; one waiting for a verdict also shows its
 // recording, an Accept button, and a quieter Reject that asks for one sentence of why.
 // Only this machine may use it: requests must name 127.0.0.1/localhost as Host (and Origin, if
 // sent), so a website that rebinds its own name to 127.0.0.1 cannot read cards or accept them.
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { CardRow, Store } from "./db.ts";
+import { defaultIntake, type Intake, type Question } from "./intake.ts";
 import { DEFAULT_MODELS, loadModels, type ModelsConfig, type Role } from "./models.ts";
 import { accept, reject } from "./verdict.ts";
 
@@ -108,7 +111,42 @@ ${rows}
 </main></body></html>`;
 }
 
-function page(store: Store, error: string | null): string {
+/** One feature being described: the sentence, the intake questions, and the answers so far. */
+type Chat = { id: string; sentence: string; project: string; questions: Question[]; answers: string[]; drafting: boolean };
+
+/** New features go to the project the owner worked on most recently. */
+function currentProject(store: Store): string {
+  const row = store.db.prepare("SELECT project FROM cards ORDER BY updated_at DESC LIMIT 1").get() as { project: string } | undefined;
+  if (!row) throw new Error("Add a project to Peeraxis before describing a feature.");
+  return row.project;
+}
+
+/** The box at the top, or the chat while a feature is being described. */
+function intakeBox(chat: Chat | null): string {
+  if (!chat) {
+    return `<form class="intake" method="post" action="/intake">
+  <input type="text" name="sentence" required maxlength="300" placeholder="Describe a new feature in one sentence" aria-label="New feature">
+  <button type="submit">Send</button>
+</form>`;
+  }
+  const said = (who: string, text: string) => `<p class="say ${who}">${escape(text)}</p>`;
+  const lines = [said("you", chat.sentence)];
+  chat.answers.forEach((answer, i) => lines.push(said("peeraxis", chat.questions[i].question), said("you", answer)));
+  const q = chat.questions[chat.answers.length];
+  lines.push(said("peeraxis", q.question));
+  const [recommended, ...others] = q.options;
+  const choice = (option: string, cls: string) => `<button type="submit" name="answer" value="${escape(option)}" class="${cls}">${escape(option)}</button>`;
+  return `<section class="chat" aria-label="New feature">
+${lines.join("\n")}
+<form class="answers" method="post" action="/intake/${chat.id}">
+  <input type="hidden" name="index" value="${chat.answers.length}">
+  ${choice(recommended, "recommended")}<span class="tag">Recommended</span>
+  ${others.map((o) => choice(o, "other")).join("\n  ")}
+</form>
+</section>`;
+}
+
+function page(store: Store, error: string | null, chat: Chat | null = null): string {
   const all = cards(store);
   const drafts = all.filter((c) => c.state === "draft").map(draftNote).join("\n");
   const features = all.filter((c) => WHERE[c.state]).map((c) => {
@@ -143,6 +181,7 @@ function page(store: Store, error: string | null): string {
 <link rel="stylesheet" href="/style.css"></head>
 <body><main>
 <div class="row top"><h1>Peeraxis</h1> <a href="/models">Models</a></div>
+${intakeBox(chat)}
 ${error ? `<p class="error" role="alert">${escape(error)}</p>` : ""}
 ${drafts ? `<section class="drafts" aria-labelledby="needs-yes"><h2 class="heading" id="needs-yes">Needs your yes</h2>\n${drafts}\n</section>` : ""}
 ${features || `<p class="empty">There are no features yet.</p>`}
@@ -185,7 +224,8 @@ export function trusted(req: IncomingMessage, port: number): boolean {
   return [...hosts].some((h) => origin === `http://${h}`);
 }
 
-export function serve(store: Store, port: number, modelsFile?: string): Server {
+export function serve(store: Store, port: number, modelsFile?: string, intake: Intake = defaultIntake(modelsFile)): Server {
+  const chats = new Map<string, Chat>();
   const server = createServer(async (req, res) => {
     try {
       if (!trusted(req, port)) {
@@ -197,7 +237,58 @@ export function serve(store: Store, port: number, modelsFile?: string): Server {
         res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).end(body);
       const video = /^\/cards\/([0-9a-f-]{36})\/video\.webm$/.exec(url.pathname);
       const verdict = /^\/cards\/([0-9a-f-]{36})\/(accept|reject|approve)$/.exec(url.pathname);
-      if (req.method === "GET" && url.pathname === "/") html(200, page(store, null));
+      const answer = /^\/intake\/([0-9a-f-]{36})$/.exec(url.pathname);
+      if (req.method === "GET" && url.pathname === "/") html(200, page(store, null, chats.get(url.searchParams.get("intake") ?? "") ?? null));
+      else if (req.method === "POST" && url.pathname === "/intake") {
+        const sentence = (new URLSearchParams(await body(req)).get("sentence") ?? "").trim();
+        let chat: Chat;
+        try {
+          if (!sentence) throw new Error("Describe the feature in one sentence first.");
+          const project = currentProject(store);
+          chat = { id: randomUUID(), sentence, project, questions: await intake.ask(sentence, project), answers: [], drafting: false };
+          if (!chat.questions.length) store.draft(project, await intake.draft(sentence, project, []));
+        } catch (error) {
+          html(409, page(store, (error as Error).message));
+          return;
+        }
+        if (chat.questions.length) {
+          chats.set(chat.id, chat);
+          if (chats.size > 20) chats.delete(chats.keys().next().value!);
+        }
+        res.writeHead(303, { Location: chat.questions.length ? `/?intake=${chat.id}` : "/" }).end();
+      } else if (req.method === "POST" && answer) {
+        const chat = chats.get(answer[1]);
+        const form = new URLSearchParams(await body(req));
+        const choice = form.get("answer") ?? "";
+        // An answer counts only for the question it was given to, so a stale tab cannot answer the next one.
+        const problem = !chat ? "That feature was already drafted or has expired; describe it again."
+          : chat.drafting ? "Peeraxis is already drafting this card."
+          : form.get("index") !== String(chat.answers.length) ? "That question was already answered; here is where things stand."
+          : !chat.questions[chat.answers.length].options.includes(choice) ? "Pick one of the offered answers."
+          : null;
+        if (problem) {
+          html(409, page(store, problem, chat && !chat.drafting ? chat : null));
+          return;
+        }
+        const answers = [...chat!.answers, choice];
+        if (answers.length < chat!.questions.length) {
+          chat!.answers = answers;
+          res.writeHead(303, { Location: `/?intake=${chat!.id}` }).end();
+          return;
+        }
+        // The last answer is kept only once the card is drafted, so a failure can be retried in place.
+        chat!.drafting = true;
+        try {
+          const answered = answers.map((a, i) => ({ question: chat!.questions[i].question, answer: a }));
+          store.draft(chat!.project, await intake.draft(chat!.sentence, chat!.project, answered));
+          chats.delete(chat!.id);
+        } catch (error) {
+          chat!.drafting = false;
+          html(502, page(store, `Peeraxis could not draft the card: ${(error as Error).message}`, chat!));
+          return;
+        }
+        res.writeHead(303, { Location: "/" }).end();
+      }
       else if (req.method === "GET" && url.pathname === "/models") html(200, modelsPage(modelsFile ? loadModels(modelsFile) : DEFAULT_MODELS));
       else if (req.method === "GET" && url.pathname === "/style.css") {
         res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" }).end(readFileSync(join(WEB, "style.css")));

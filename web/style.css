@@ -41,3 +41,17 @@ a:hover { text-decoration: underline; }
 .models .job:first-child { border-top: 0; }
 .models dt { color: #1d1d1f; }
 .models dd { margin: 0; color: #424245; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+.intake { display: flex; gap: 8px; margin: 0 0 16px; }
+.intake input { flex: 1; min-width: 0; font: inherit; padding: 10px 14px; border: 1px solid #d2d2d7; border-radius: 10px; background: #fff; }
+.intake button { flex: none; font: inherit; font-weight: 600; padding: 10px 20px; border: 0; border-radius: 10px; background: #0071e3; color: #fff; cursor: pointer; }
+.chat { display: flex; flex-direction: column; gap: 8px; max-width: 720px; margin: 0 0 16px; }
+.say { margin: 0; max-width: 80%; padding: 8px 14px; border-radius: 16px; }
+.say.you { align-self: flex-end; background: #0071e3; color: #fff; }
+.say.peeraxis { align-self: flex-start; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.answers { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.answers button { font: inherit; border-radius: 999px; cursor: pointer; }
+.answers .recommended { font-weight: 600; padding: 8px 20px; border: 0; background: #0071e3; color: #fff; }
+.answers .recommended:hover, .intake button:hover { background: #0077ed; }
+.answers .tag { font-size: 13px; color: #6e6e73; margin-right: 8px; }
+.answers .other { font-size: 14px; padding: 6px 14px; border: 1px solid #d2d2d7; background: #fff; color: #424245; }
+.answers .other:hover { background: #ececf0; }
