@@ -368,3 +368,18 @@ test("a plan with a choice, a change and a report: the pick guides the change; n
   assert.equal(s.store.getCard(plan).state, "accepted");
   assert.equal(git(s.root, "log", "--format=%s", "-1", "main"), "Greeting says hello");
 });
+
+test("cards after a choice wait for the owner's pick while other work goes ahead", async () => {
+  const s = setup();
+  const card = (title: string, kind: "change" | "choice") => ({ ...CARD, title, kind });
+  const plan = s.store.draftPlan(s.root, { title: "Plan", before: "b", after: "a", cards: [card("Pick a look", "choice"), card("Use the look", "change")] });
+  s.store.approvePlan(plan);
+  const other = s.store.approve(s.root, { ...CARD, title: "Unrelated card" });
+  const [choice, after] = s.store.children(plan).map((c) => c.id);
+  assert.equal(s.store.next()?.id, choice);
+  s.store.move(choice, "building");
+  s.store.move(choice, "waiting", {});
+  assert.equal(s.store.next()?.id, other, "the card after the choice should wait for the pick");
+  s.store.move(choice, "accepted", { choice: 1 });
+  assert.equal(s.store.next()?.id, after);
+});

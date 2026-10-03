@@ -179,13 +179,28 @@ export class Store {
       .map((e) => ({ kind: e.kind, data: JSON.parse(e.data) }));
   }
 
-  /** The card the engine should work on now: an unfinished one first, then the oldest approved. */
+  /**
+   * The card the engine should work on now: an unfinished one first, then the oldest approved. A card
+   * that comes after a choice in its plan waits until the owner has picked, so it never guesses the look.
+   */
   next(): CardRow | null {
-    const row = this.db.prepare(`
+    const rows = this.db.prepare(`
       SELECT id FROM cards WHERE state IN ('testing','building','checking','approved')
-      ORDER BY CASE state WHEN 'approved' THEN 1 ELSE 0 END, created_at LIMIT 1`).get() as { id: string } | undefined;
-    return row ? this.getCard(row.id) : null;
+      ORDER BY CASE state WHEN 'approved' THEN 1 ELSE 0 END, created_at`).all() as { id: string }[];
+    for (const { id } of rows) {
+      const row = this.getCard(id);
+      if (row.state === "approved" && row.parent && this.waitsForPick(row)) continue;
+      return row;
+    }
+    return null;
   }
+
+  private waitsForPick(row: CardRow): boolean {
+    const { created_at } = this.db.prepare("SELECT created_at FROM cards WHERE id = ?").get(row.id) as { created_at: string };
+    const earlier = this.db.prepare("SELECT card, state FROM cards WHERE parent = ? AND created_at < ?").all(row.parent, created_at) as { card: string; state: string }[];
+    return earlier.some((c) => JSON.parse(c.card).kind === "choice" && c.state !== "accepted");
+  }
+
 
   children(parent: string): CardRow[] {
     return (this.db.prepare("SELECT id FROM cards WHERE parent = ? ORDER BY created_at").all(parent) as { id: string }[])
