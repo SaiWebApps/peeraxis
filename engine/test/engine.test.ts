@@ -85,8 +85,8 @@ test("a hidden test that already passes is rewritten, then the card parks withou
   });
   const id = s.store.approve(s.root, CARD);
   await s.engine.step();
-  assert.equal(s.calls.filter((c) => c.role === "testAuthor").length, 3);
-  assert.match(s.calls[1].run.prompt, /passes on the current code/);
+  assert.equal(s.calls.filter((c) => c.role === "testAuthor").length, 6);
+  assert.match(s.calls.filter((c) => c.role === "testAuthor")[1].run.prompt, /passes on the current code/);
   assert.equal(s.calls.filter((c) => c.role === "builder").length, 0);
   assert.equal(s.store.getCard(id).state, "parked");
 });
@@ -319,7 +319,7 @@ test("a parked card's sentence is plain; the technical detail goes only to the e
   const id = s.store.approve(s.root, CARD);
   await s.engine.step();
   const parked = s.store.events(id).find((e) => e.kind === "card.parked")!;
-  assert.equal(parked.data.sentence, "Peeraxis couldn't write a fair hidden test for this card in 3 tries.");
+  assert.equal(parked.data.sentence, "Peeraxis couldn't write a fair hidden test for this card in 6 tries.");
   assert.match(String(parked.data.detail), /getByText/);
 });
 

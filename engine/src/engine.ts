@@ -38,8 +38,11 @@ class Park extends Error {
 }
 
 const TRIES = 2;
-/** Writing a fair hidden test is harder than it looks; the author gets one more try (runs 0822c289, da199015). */
-const TEST_TRIES = 3;
+/**
+ * Writing a fair hidden test for a screen that does not exist yet is hard (runs 0822c289, da199015,
+ * e6674821, ba951f50). The card check runs first because it is quick, so the author gets several tries.
+ */
+const TEST_TRIES = 6;
 
 export class Engine {
   readonly limits: Limits = {};
@@ -137,8 +140,6 @@ export class Engine {
           continue;
         }
         const source = readFileSync(join(copy, testFile), "utf8");
-        const red = await this.runAcceptance(row, plugin, row.project, sha, source, testFile, `red-${attempt}`);
-        if (red.ok) { feedback.push("The test passes on the current code, so it does not check the new feature."); continue; }
         const checker = this.choose(row.id, "cardCheck", author.family);
         const check = await this.ask(row.id, "cardCheck", checker, {
           cwd: copy, write: false, minutes: 10, schema: jobs.CARD_CHECK_SCHEMA,
@@ -148,6 +149,8 @@ export class Engine {
         const verdict = check.json as { matches: boolean; problems: string[] } | undefined;
         if (!check.ok || !verdict) { feedback.push("The test could not be checked against the card."); continue; }
         if (!verdict.matches) { feedback.push(verdict.problems.join(" ")); continue; }
+        const red = await this.runAcceptance(row, plugin, row.project, sha, source, testFile, `red-${attempt}`);
+        if (red.ok) { feedback.push("The test passes on the current code, so it does not check the new feature."); continue; }
         const store = this.cardDir(row.id, "test");
         writeFileSync(join(store, "test.src"), source);
         this.deps.store.event(row.id, "test.ready", { testFile, author: author.id, hash: sha256(source), names });
