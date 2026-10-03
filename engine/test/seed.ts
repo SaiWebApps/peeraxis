@@ -56,6 +56,18 @@ walk(accepted, ["testing", "building", "checking"]);
 store.move(accepted, "waiting", { sha: git("rev-parse", "main"), builder: "claude-opus-5-5" });
 store.move(accepted, "accepted", { sha: git("rev-parse", "main"), main: "main" });
 
+// A second project, so screens that choose between projects have something to choose.
+const second = join(home, "second-project");
+mkdirSync(join(second, ".peeraxis"), { recursive: true });
+writeFileSync(join(second, ".peeraxis/project.json"), JSON.stringify({
+  setup: "true", check: "true", acceptance: "true", testFile: "t/{name}.test.js", allowedPaths: ["**"],
+}));
+execFileSync("git", ["init", "-q", "-b", "main"], { cwd: second });
+const secondCard = store.approve(second, card("Second project is set up", "The second project has its first feature."));
+walk(secondCard, ["testing", "building", "checking"]);
+store.move(secondCard, "waiting", { sha: "0".repeat(40), builder: "claude-opus-5-5" });
+store.move(secondCard, "accepted", { sha: "0".repeat(40), main: "main" });
+
 const draft = store.draft(project, {
   title: "Show the date each feature finished",
   before: "Finished features do not say when they finished.",
@@ -64,4 +76,4 @@ const draft = store.draft(project, {
   notIncluded: ["Times of day"],
 });
 
-console.log(JSON.stringify({ project, waiting, building, parked, accepted, draft }));
+console.log(JSON.stringify({ project, second, waiting, building, parked, accepted, draft }));
