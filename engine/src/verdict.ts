@@ -14,9 +14,26 @@ function waitingSha(store: Store, id: string): string {
   return sha;
 }
 
-/** Moves main forward to one waiting feature. Verdicts go oldest first, one feature at a time. */
-export async function accept(store: Store, id: string): Promise<void> {
+/** When every card of a plan has a verdict, the plan itself is done. */
+function finishPlan(store: Store, id: string): void {
+  const parent = store.getCard(id).parent;
+  if (!parent || store.getCard(parent).state !== "split") return;
+  if (store.children(parent).every((c) => c.state === "accepted" || c.state === "rejected")) store.move(parent, "accepted", {});
+}
+
+/**
+ * Moves main forward to one waiting feature. Verdicts go oldest first, one feature at a time.
+ * A report or a choice has nothing to land: accepting records it (and, for a choice, the option picked).
+ */
+export async function accept(store: Store, id: string, choice?: number): Promise<void> {
   const row = store.getCard(id);
+  if (row.card.kind === "report" || row.card.kind === "choice") {
+    if (row.state !== "waiting") throw new Error(`"${row.card.title}" is ${row.state}, not waiting for a verdict.`);
+    if (row.card.kind === "choice" && !(choice && choice >= 1 && choice <= 3)) throw new Error("Pick one of the three options.");
+    store.move(id, "accepted", row.card.kind === "choice" ? { choice } : {});
+    finishPlan(store, id);
+    return;
+  }
   const root = row.project;
   const plugin = loadPlugin(root);
   await syncWaiting(store, root, plugin);
@@ -35,6 +52,7 @@ export async function accept(store: Store, id: string): Promise<void> {
     git(root, ["update-ref", `refs/heads/${main}`, sha, mainSha]);
   }
   store.move(id, "accepted", { sha, main });
+  finishPlan(store, id);
   if (git(root, ["rev-parse", `refs/heads/${WAITING}`]) === git(root, ["rev-parse", `refs/heads/${main}`])) {
     git(root, ["branch", "--quiet", "-D", WAITING]); // nothing left waiting
   }
@@ -45,6 +63,11 @@ export async function reject(store: Store, id: string, reason: string): Promise<
   const why = reason.trim();
   if (!why) throw new Error("Say in one sentence why the feature is rejected.");
   const row = store.getCard(id);
+  if (row.card.kind === "report" || row.card.kind === "choice") {
+    store.move(id, "rejected", { reason: why });
+    finishPlan(store, id);
+    return;
+  }
   const root = row.project;
   const plugin = loadPlugin(root);
   await syncWaiting(store, root, plugin);
@@ -57,6 +80,7 @@ export async function reject(store: Store, id: string, reason: string): Promise<
     if (problem) throw new Error(`The newer waiting features could not be kept without this one: ${problem}`);
   }
   store.move(id, "rejected", { sha, reason: why });
+  finishPlan(store, id);
   if (git(root, ["rev-parse", `refs/heads/${WAITING}`]) === git(root, ["rev-parse", `refs/heads/${plugin.mainBranch}`])) {
     git(root, ["branch", "--quiet", "-D", WAITING]); // nothing left waiting
   }

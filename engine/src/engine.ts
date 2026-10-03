@@ -1,6 +1,7 @@
 // The loop. Code owns every transition: test → build → check → land, with caps, splits and
 // parking. Models only fill in the work inside each phase.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { Store, CardRow, Card } from "./db.ts";
@@ -11,6 +12,8 @@ import { runStage, type StageResult } from "./proc.ts";
 import { baseOf, changedPaths, commitAll, diff, git, landOnWaiting, litter, makeCopy, newLitter, outsideAllowed, removeCopy } from "./git.ts";
 import * as jobs from "./jobs.ts";
 import { syncWaiting } from "./sync.ts";
+import { ArtifactFailed, chosenDirection, runArtifact } from "./artifacts.ts";
+import { pluginFolders } from "./agents.ts";
 import { measure, worse, type Health } from "./health.ts";
 
 export type Deps = { store: Store; dataDir: string; models: () => ModelsConfig; agent: AgentRunner };
@@ -40,7 +43,7 @@ const TEST_TRIES = 3;
 
 export class Engine {
   readonly limits: Limits = {};
-  private readonly deps: Deps;
+  readonly deps: Deps;
   constructor(deps: Deps) {
     this.deps = deps;
   }
@@ -53,13 +56,17 @@ export class Engine {
     await syncWaiting(this.deps.store, row.project, plugin);
     const before = litter(row.project);
     try {
-      if (row.state === "approved") this.deps.store.move(row.id, "testing");
-      if (this.state(row.id) === "testing") await this.writeTest(row, plugin);
-      await this.buildAndCheck(row, plugin);
+      if (row.card.kind === "report" || row.card.kind === "choice") await runArtifact(this, row, plugin);
+      else {
+        if (row.state === "approved") this.deps.store.move(row.id, "testing");
+        if (this.state(row.id) === "testing") await this.writeTest(row, plugin);
+        await this.buildAndCheck(row, plugin);
+      }
     } catch (error) {
       if (error instanceof Wait) throw error;
-      const sentence = error instanceof Park ? error.message : "Peeraxis hit an unexpected error while working on this card.";
-      const detail = error instanceof Park ? error.detail : String((error as Error).stack ?? error);
+      const plain = error instanceof Park || error instanceof ArtifactFailed;
+      const sentence = plain ? (error as Error).message : "Peeraxis hit an unexpected error while working on this card.";
+      const detail = plain ? (error as Park).detail : String((error as Error).stack ?? error);
       this.deps.store.move(row.id, "parked", { sentence, detail });
     } finally {
       const leftovers = newLitter(before, litter(row.project));
@@ -73,13 +80,13 @@ export class Engine {
     return this.deps.store.getCard(id).state;
   }
 
-  private cardDir(id: string, ...parts: string[]): string {
+  cardDir(id: string, ...parts: string[]): string {
     const dir = join(this.deps.dataDir, "cards", id, ...parts);
     mkdirSync(dir, { recursive: true });
     return dir;
   }
 
-  private choose(card: string, role: Role, avoid?: Family): Model & { label?: string } {
+  choose(card: string, role: Role, avoid?: Family): Model & { label?: string } {
     const choice = pick(this.deps.models(), role, this.limits, avoid);
     if (choice.kind === "wait") {
       this.deps.store.event(card, "limit.wait", { role, until: new Date(choice.until).toISOString(), reason: choice.reason });
@@ -89,7 +96,7 @@ export class Engine {
     return { ...choice.model, label: choice.label };
   }
 
-  private async ask(card: string, role: Role, model: Model, run: Omit<Parameters<AgentRunner>[0], "model">): Promise<AgentResult> {
+  async ask(card: string, role: Role, model: Model, run: Omit<Parameters<AgentRunner>[0], "model">): Promise<AgentResult> {
     this.deps.store.event(card, "agent.started", { role, model: model.id });
     const result = await this.deps.agent({ ...run, model });
     if (result.limitUntil) {
@@ -199,10 +206,22 @@ export class Engine {
       try {
         const setup = await runStage({ command: plugin.setup, cwd: copy, timeoutMs: plugin.minutes.setup * 60_000 });
         if (!setup.ok) throw new Park("Setting up the project failed, so nothing was built.", lastLine(setup.tail));
+        const direction = chosenDirection(this, row);
+        if (direction) {
+          // The look the owner picked earlier in this plan, as a reference inside the copy (never committed).
+          mkdirSync(join(copy, ".peeraxis-direction"), { recursive: true });
+          copyFileSync(direction.html, join(copy, ".peeraxis-direction", "chosen.html"));
+          if (existsSync(direction.png)) copyFileSync(direction.png, join(copy, ".peeraxis-direction", "chosen.png"));
+          execFileSync("/bin/sh", ["-c", 'printf "/.peeraxis-direction/\\n" >> .git/info/exclude'], { cwd: copy });
+        }
+        const lookNote = direction
+          ? `The owner picked this look for the product: "${direction.name}". Match it; the reference page is .peeraxis-direction/chosen.html (screenshot: chosen.png).`
+          : undefined;
         const built = await this.ask(row.id, "builder", builder, {
           cwd: copy, write: true, minutes: plugin.minutes.build,
-          prompt: jobs.builderPrompt(row.card, allowed, facts, plugin.notes),
+          prompt: jobs.builderPrompt(row.card, allowed, facts, [plugin.notes, lookNote].filter(Boolean).join("\n\n") || undefined),
           canUseTool: jobs.builderPolicy(copy, allowed, [this.deps.dataDir]),
+          plugins: pluginFolders(plugin.skills),
         });
         if (built.limitUntil) { attempt--; continue; }
         const verdict = await this.verify(row, plugin, copy, base, allowed, test, baseline, built, attempt,
@@ -325,8 +344,14 @@ export class Engine {
     }
     for (;;) {
       const reviewer = this.choose(row.id, "lookReviewer", builderFamily);
+      const direction = chosenDirection(this, row);
+      const reference = direction && existsSync(direction.png) ? join(dir, "chosen-look.png") : null;
+      if (reference) copyFileSync(direction!.png, reference);
+      const prompt = jobs.lookPrompt(row.card, steps.length > 0) + (reference
+        ? `\n\nThe owner picked the look "${direction!.name}"; chosen-look.png shows it. The feature should clearly follow it.`
+        : "");
       const result = await this.ask(row.id, "lookReviewer", reviewer, {
-        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: shots, prompt: jobs.lookPrompt(row.card, steps.length > 0),
+        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: reference ? [...shots, reference] : shots, prompt,
       });
       if (result.limitUntil) continue;
       const verdict = result.json as { verdict: string; findings: { blocking: boolean; text: string }[] } | undefined;

@@ -216,7 +216,8 @@ test("an answer from a stale tab never answers a later question, and a failed dr
     draft: async (_s, _p, answered) => {
       seen.push(answered.map((a) => a.answer));
       if (fail) throw new Error("model was busy");
-      return { title: "Drafted", before: "b", after: "a", watch: ["w"], notIncluded: [] };
+      const card = { title: "Drafted", before: "b", after: "a", watch: ["w"], notIncluded: [] };
+      return { title: card.title, before: card.before, after: card.after, cards: [card] };
     },
   };
   const port = await freePort();
@@ -244,4 +245,31 @@ test("an answer from a stale tab never answers a later question, and a failed dr
   assert.equal((await post(action, { index: "1", answer: "C" })).status, 303);
   assert.deepEqual(seen, [["B", "D"], ["B", "C"]]);
   assert.match(await (await fetch(`${base}/`)).text(), /<h2>Drafted<\/h2>/);
+});
+
+test("a vague request becomes a plan of cards that one Approve queues in order", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "pxhome-"));
+  const seed = JSON.parse(execFileSync(process.execPath, [join(import.meta.dirname, "seed.ts")], { env: { ...process.env, PEERAXIS_HOME: home }, encoding: "utf8" }));
+  const store = new Store(join(home, "peeraxis.sqlite"));
+  const card = (title: string, kind: "change" | "report" | "choice") => ({ kind, title, before: "b", after: `${title} done.`, watch: ["See it"], notIncluded: [] });
+  const intake: Intake = {
+    ask: async () => [],
+    draft: async () => ({ title: "Make it look good", before: "It looks plain.", after: "It looks good.", cards: [card("Pick a look", "choice"), card("Restyle the home page", "change"), card("Report on the new look", "report")] }),
+  };
+  const port = await freePort();
+  const server = serve(store, port, undefined, intake);
+  t.after(() => server.close());
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${port}`;
+  const post = (path: string, body: string) => fetch(`${base}${path}`, { method: "POST", body, redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: base } });
+  await post("/intake", `sentence=make+it+look+good&project=${encodeURIComponent(seed.project)}`);
+  const html = await (await fetch(`${base}/`)).text();
+  assert.match(html, /Make it look good[\s\S]*Pick a look[\s\S]*You pick[\s\S]*Restyle the home page[\s\S]*Report on the new look[\s\S]*Approve plan/);
+  assert.doesNotMatch(html, /data-state="draft"><h2>Restyle the home page/); // cards show inside the plan only
+  const plan = (store.db.prepare("SELECT id FROM cards WHERE card LIKE '%Make it look good%'").get() as { id: string }).id;
+  await post(`/cards/${plan}/approve`, "");
+  assert.equal(store.getCard(plan).state, "split");
+  assert.deepEqual(store.children(plan).map((c) => [c.card.title, c.state]), [["Pick a look", "approved"], ["Restyle the home page", "approved"], ["Report on the new look", "approved"]]);
+  const queue = (store.db.prepare("SELECT card FROM cards WHERE state = 'approved' ORDER BY created_at").all() as { card: string }[]).map((r) => JSON.parse(r.card).title);
+  assert.deepEqual(queue.slice(-3), ["Pick a look", "Restyle the home page", "Report on the new look"]);
 });

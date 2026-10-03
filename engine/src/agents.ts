@@ -2,7 +2,7 @@
 // Both return the same shape, including a usage-limit signal the engine turns into a wait.
 import { query, type CanUseTool, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Codex } from "@openai/codex-sdk";
-import { copyFileSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { assertAllowed, type Model } from "./models.ts";
@@ -18,6 +18,7 @@ export type AgentRun = {
   schema?: Record<string, unknown>; // ask for a JSON answer in this shape
   canUseTool?: CanUseTool; // Claude only: decides every tool call
   images?: string[]; // screenshots the model should look at (absolute paths inside cwd)
+  plugins?: string[]; // Claude only: plugin folders whose skills the model may use
 };
 
 export type AgentResult = {
@@ -59,10 +60,11 @@ async function runClaude(run: AgentRun): Promise<AgentResult> {
         strictMcpConfig: true,
         mcpServers: {},
         tools: run.write
-          ? ["Read", "Edit", "Write", "Glob", "Grep", "Bash", "TodoWrite"]
+          ? ["Read", "Edit", "Write", "Glob", "Grep", "Bash", "TodoWrite", ...(run.plugins?.length ? ["Skill"] : [])]
           : ["Read", "Glob", "Grep"],
         permissionMode: "default",
         canUseTool: run.canUseTool ?? readOnlyInside(run.cwd),
+        ...(run.plugins?.length ? { plugins: run.plugins.map((path) => ({ type: "local" as const, path, skipMcpDiscovery: true })), skills: "all" as const } : {}),
         maxTurns: 400,
         abortController: abort,
         ...(run.schema ? { outputFormat: { type: "json_schema" as const, schema: run.schema } } : {}),
@@ -169,4 +171,21 @@ export function readOnlyInside(cwd: string): CanUseTool {
     }
     return { behavior: "deny", message: `${tool} is not allowed here.` };
   };
+}
+
+/** The installed folder of each named Claude plugin (newest version), for AgentRun.plugins. */
+export function pluginFolders(names: string[]): string[] {
+  const cache = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude-personal"), "plugins", "cache");
+  const found: string[] = [];
+  for (const name of names) {
+    for (const market of existsSync(cache) ? readdirSync(cache) : []) {
+      for (const plugin of [name, `${name}-skill`]) {
+        const dir = join(cache, market, plugin);
+        if (!existsSync(dir)) continue;
+        const versions = readdirSync(dir).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        if (versions.length) found.push(join(dir, versions.at(-1)!));
+      }
+    }
+  }
+  return [...new Set(found)];
 }

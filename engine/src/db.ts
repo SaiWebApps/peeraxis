@@ -11,6 +11,12 @@ export type Card = {
   notIncluded: string[];
   look?: string; // short look brief, for screen changes
   allowedPaths?: string[]; // narrows the plug-in's allowed paths
+  /**
+   * change (default): a code change proved by a hidden test. report: a written result (e.g. running the
+   * product and reporting on it), checked by a reviewer. choice: visual options the owner picks from.
+   * plan: a parent holding an ordered list of cards drafted from one request.
+   */
+  kind?: "change" | "report" | "choice" | "plan";
 };
 
 export type CardState =
@@ -27,16 +33,16 @@ export type CardRow = {
 };
 
 const NEXT: Record<CardState, CardState[]> = {
-  draft: ["approved"],
-  approved: ["testing", "parked"],
+  draft: ["approved", "split"],
+  approved: ["testing", "building", "parked"],
   testing: ["testing", "building", "parked"],
-  building: ["building", "checking", "parked", "split"],
+  building: ["building", "checking", "parked", "split", "waiting"], // waiting: reports and choices land nothing
   checking: ["building", "waiting", "parked"],
   waiting: ["accepted", "rejected"],
   accepted: [],
   rejected: [],
   parked: ["approved", "rejected"], // rejected: dropped by the owner, e.g. replaced by a later card
-  split: ["waiting", "parked"],
+  split: ["waiting", "parked", "accepted"],
 };
 
 export function cardHash(card: Card): string {
@@ -110,6 +116,35 @@ export class Store {
       .run(id, project, JSON.stringify(card), cardHash(card), now, now);
     this.event(id, "card.drafted", { title: card.title });
     return id;
+  }
+
+  /**
+   * Drafts a plan: a parent card summing up the request and its ordered child cards, all waiting for
+   * one yes. The children keep the parent's place in the queue, in order.
+   */
+  draftPlan(project: string, plan: { title: string; before: string; after: string; cards: Card[] }): string {
+    const summary: Card = {
+      kind: "plan", title: plan.title, before: plan.before, after: plan.after,
+      watch: plan.cards.map((c) => c.title).slice(0, 8), notIncluded: [],
+    };
+    const id = this.draft(project, summary);
+    plan.cards.slice(0, 8).forEach((card, i) => {
+      const problem = validateCard(card);
+      if (problem) throw new Error(`Card ${i + 1} of the plan is not usable: ${problem}`);
+      const child = randomUUID();
+      const now = new Date().toISOString();
+      this.db.prepare("INSERT INTO cards VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)")
+        .run(child, project, id, JSON.stringify(card), cardHash(card), this.queuePlace(id), now);
+      this.event(child, "card.drafted", { title: card.title, plan: id });
+    });
+    return id;
+  }
+
+  /** One yes approves a whole plan: the parent stands for the list, the children join the queue in order. */
+  approvePlan(id: string): void {
+    const children = this.children(id).filter((c) => c.state === "draft");
+    this.move(id, "split", { children: children.map((c) => c.id) });
+    for (const child of children) this.move(child.id, "approved");
   }
 
   getCard(id: string): CardRow {

@@ -216,3 +216,52 @@ export function builderPolicy(copy: string, allowed: string[], forbidden: string
     return { behavior: "allow", updatedInput: input };
   };
 }
+
+export function reportPrompt(card: Card, out: string, liveNotes: string | undefined, facts: string[]): string {
+  return [
+    "Do this piece of work in the current project and write a report on it. The report is the deliverable;",
+    "change nothing in the project that is meant to last (any helper files you write are thrown away).",
+    "",
+    cardText(card),
+    "",
+    `Write the report as Markdown to ${out}/report.md, with one section per watched step, in order, plus a`,
+    "short summary at the top. Write in the owner's plain words, with concrete examples and quotes from what",
+    `actually happened. Save any screenshots or transcripts that support it in ${out} and link them from the report.`,
+    "Do the work for real: actually run things and report what happened, never what probably would happen.",
+    ...(liveNotes ? ["", "How to run the real product here:", liveNotes] : []),
+    ...(facts.length ? ["", "Fix these problems from the last attempt:", ...facts.map((f) => `- ${f}`)] : []),
+    "",
+    "When done, reply with the report's summary in at most three sentences.",
+  ].join("\n");
+}
+
+export function reportReviewPrompt(card: Card, report: string): string {
+  return [
+    "Review this report against the card that asked for it. Mark a finding blocking only if the report",
+    "misses something the card asked for, claims things it did not show evidence for, or is hard for the",
+    "owner to read. Each finding is one plain sentence. Say 'fix' only if at least one finding is blocking.",
+    "",
+    cardText(card),
+    "",
+    "Report:",
+    report.length > 150_000 ? `${report.slice(0, 150_000)}\n[truncated]` : report,
+  ].join("\n");
+}
+
+export function choicePrompt(card: Card, out: string, notes: string | undefined): string {
+  return [
+    "Make 3 clearly different visual options for the owner to choose from. Study the current product first",
+    "(its screens, real content and purpose), then design each option as a polished, self-contained HTML page",
+    "(inline CSS, no external files except web fonts) showing the product's main screen with its real content.",
+    "Use your design skills (for example impeccable or taste) to make each option distinct and high quality,",
+    "not three variations of one idea. Change nothing in the project.",
+    "",
+    cardText(card),
+    "",
+    `Write ${out}/option-1.html, ${out}/option-2.html and ${out}/option-3.html, and for each a one-line`,
+    `description in ${out}/option-1.txt (and -2, -3) naming the direction in plain words, e.g. "Calm and editorial".`,
+    ...(notes ? ["", "About this project:", notes] : []),
+    "",
+    "When done, reply with the three one-line descriptions.",
+  ].join("\n");
+}

@@ -322,3 +322,49 @@ test("a parked card's sentence is plain; the technical detail goes only to the e
   assert.equal(parked.data.sentence, "Peeraxis couldn't write a fair hidden test for this card in 3 tries.");
   assert.match(String(parked.data.detail), /getByText/);
 });
+
+test("a plan with a choice, a change and a report: the pick guides the change; nothing but the change lands", async () => {
+  const { accept } = await import("../src/verdict.ts");
+  let sawDirection = false;
+  const s = setup({
+    builder: (run, call) => {
+      const out = /to (\S+)\/report\.md/.exec(run.prompt)?.[1] ?? /Write (\S+)\/option-1\.html/.exec(run.prompt)?.[1];
+      if (run.prompt.startsWith("Make 3")) {
+        for (const n of [1, 2, 3]) {
+          writeFileSync(join(out!, `option-${n}.html`), `<h1 style="color:${["red", "green", "blue"][n - 1]}">Option ${n}</h1>`);
+          writeFileSync(join(out!, `option-${n}.txt`), ["Bold", "Calm", "Playful"][n - 1]);
+        }
+        return { ok: true, text: "three options" };
+      }
+      if (run.prompt.startsWith("Do this piece")) {
+        writeFileSync(join(out!, "report.md"), `# Summary\n\nIt went well.\n\n## What went well\n\n${"Real details. ".repeat(30)}`);
+        return { ok: true, text: "report written" };
+      }
+      sawDirection = existsSync(join(run.cwd, ".peeraxis-direction", "chosen.html")) && /picked this look for the product: "Calm"/.test(run.prompt);
+      return DEFAULT_SCRIPT.builder(run, call);
+    },
+  });
+  const card = (title: string, kind: "change" | "report" | "choice", extra = {}) => ({ ...CARD, title, kind, ...extra });
+  const plan = s.store.draftPlan(s.root, { title: "Make it nicer", before: "Plain.", after: "Nicer.", cards: [card("Pick a look", "choice"), card("Greeting says hello", "change"), card("Report on it", "report")] });
+  s.store.approvePlan(plan);
+  const [choice, change, report] = s.store.children(plan).map((c) => c.id);
+
+  await s.engine.step();
+  assert.equal(s.store.getCard(choice).state, "waiting", JSON.stringify(s.store.events(choice).filter((e) => /parked|failed/.test(e.kind))));
+  for (const n of [1, 2, 3]) assert.ok(existsSync(join(s.dataDir, "cards", choice, "evidence", "choice", `option-${n}.png`)));
+  await assert.rejects(accept(s.store, choice), /Pick one/);
+  await accept(s.store, choice, 2);
+
+  await s.engine.step();
+  assert.equal(s.store.getCard(change).state, "waiting");
+  assert.ok(sawDirection, "the builder did not get the chosen look");
+  assert.equal(git(s.root, "ls-tree", "-r", "--name-only", WAITING).includes(".peeraxis-direction"), false);
+
+  await s.engine.step();
+  assert.equal(s.store.getCard(report).state, "waiting");
+  assert.equal(s.calls.find((c) => c.run.prompt.startsWith("Review this report"))?.model, "gpt-6-astra");
+  await accept(s.store, change);
+  await accept(s.store, report);
+  assert.equal(s.store.getCard(plan).state, "accepted");
+  assert.equal(git(s.root, "log", "--format=%s", "-1", "main"), "Greeting says hello");
+});

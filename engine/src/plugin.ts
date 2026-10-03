@@ -13,10 +13,14 @@ export type Plugin = {
   allowedPaths: string[]; // globs the builder may change
   copyIn: string[]; // untracked dev files copied into every copy, e.g. ".env.peeraxis"
   mainBranch: string;
+  /** For report cards that run the real product: extra dev files (e.g. ".env.local") and how to start it. */
+  live?: { copyIn: string[]; notes: string };
+  /** Installed Claude plugins whose skills the builder and look work may use, e.g. ["impeccable"]. */
+  skills: string[];
   minutes: { setup: number; check: number; acceptance: number; build: number };
 };
 
-const KNOWN = new Set(["setup", "check", "acceptance", "health", "testFile", "testExample", "notes", "allowedPaths", "copyIn", "mainBranch", "minutes"]);
+const KNOWN = new Set(["setup", "check", "acceptance", "health", "testFile", "testExample", "notes", "allowedPaths", "copyIn", "mainBranch", "live", "skills", "minutes"]);
 
 export function loadPlugin(root: string): Plugin {
   const file = join(root, ".peeraxis", "project.json");
@@ -45,6 +49,8 @@ export function loadPlugin(root: string): Plugin {
     allowedPaths: raw.allowedPaths as string[],
     copyIn: (raw.copyIn as string[] | undefined) ?? [],
     mainBranch: (raw.mainBranch as string | undefined) ?? "main",
+    live: raw.live as Plugin["live"],
+    skills: (raw.skills as string[] | undefined) ?? [],
     minutes: { setup: 15, check: 20, acceptance: 20, build: 60, ...minutes },
   };
 }

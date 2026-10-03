@@ -7,9 +7,10 @@
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { basename, join } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
+import { markdown } from "./markdown.ts";
 import type { CardRow, Store } from "./db.ts";
-import { defaultIntake, type Intake, type Question } from "./intake.ts";
+import { defaultIntake, storeDraft, type Intake, type Question } from "./intake.ts";
 import { DEFAULT_MODELS, KNOWN_MODELS, loadModels, saveModels, withModel, type ModelsConfig, type Role } from "./models.ts";
 import { accept, reject } from "./verdict.ts";
 
@@ -70,7 +71,8 @@ const WHERE: Partial<Record<CardRow["state"], [label: string, tone: string]>> = 
 };
 
 /** A drafted card as a short note: title, Before and After, the steps to watch, and Approve. */
-function draftNote(c: CardRow): string {
+function draftNote(c: CardRow, store: Store): string {
+  if (c.card.kind === "plan") return planNote(c, store);
   const steps = c.card.watch.map((s) => `<li>${escape(s)}</li>`).join("");
   return `<article class="feature draft" data-card="${c.id}" data-state="draft"><h2>${escape(c.card.title)}</h2>
   <p class="project">${escape(basename(c.project))}</p>
@@ -81,11 +83,71 @@ function draftNote(c: CardRow): string {
 </article>`;
 }
 
-/** Approving a draft freezes it and puts it in the queue. */
+const KIND_WORD: Record<string, string> = { change: "", report: "Report", choice: "You pick" };
+
+/** A drafted plan: what it delivers, then its cards in order, with one Approve for all of them. */
+function planNote(c: CardRow, store: Store): string {
+  const items = store.children(c.id).map((k) => {
+    const word = KIND_WORD[k.card.kind ?? "change"];
+    return `<li><strong>${escape(k.card.title)}</strong>${word ? ` <span class="badge queued">${word}</span>` : ""}<br><span class="after">${escape(k.card.after)}</span></li>`;
+  }).join("");
+  return `<article class="feature draft plan" data-card="${c.id}" data-state="draft"><h2>${escape(c.card.title)}</h2>
+  <p class="project">${escape(basename(c.project))}</p>
+  <p class="line"><span>Before:</span> ${escape(c.card.before)}</p>
+  <p class="line"><span>After:</span> ${escape(c.card.after)}</p>
+  <ol class="steps plan-cards">${items}</ol>
+  <form method="post" action="/cards/${c.id}/approve"><button type="submit" class="approve">Approve plan</button></form>
+</article>`;
+}
+
+/** Approving a draft freezes it and puts it in the queue; approving a plan queues all its cards in order. */
 export function approveDraft(store: Store, id: string): void {
   const row = store.getCard(id);
   if (row.state !== "draft") throw new Error(`"${row.card.title}" is ${row.state}, not a draft waiting for your yes.`);
-  store.move(id, "approved");
+  if (row.card.kind === "plan") store.approvePlan(id);
+  else store.move(id, "approved");
+}
+
+/** The folder holding a waiting report's or choice's files, if any. */
+function artifactDir(store: Store, id: string): string | null {
+  const landed = [...store.events(id)].reverse().find((e) => e.kind === "card.waiting");
+  const dir = landed?.data.evidence;
+  return typeof dir === "string" && existsSync(dir) ? dir : null;
+}
+
+const rejectForm = (c: CardRow) => `<form class="reject" method="post" action="/cards/${c.id}/reject">
+        <input type="text" name="reason" required maxlength="300" placeholder="Why reject? One sentence." aria-label="Why reject ${escape(c.card.title)}">
+        <button type="submit">Reject</button>
+      </form>`;
+
+/** Three options side by side, each with its name and a Pick button. */
+function choiceNote(c: CardRow, head: string, store?: Store): string {
+  const dir = store ? artifactDir(store, c.id) : null;
+  const name = (n: number) => (dir && existsSync(join(dir, `option-${n}.txt`)) ? readFileSync(join(dir, `option-${n}.txt`), "utf8").trim() : `Option ${n}`);
+  const options = [1, 2, 3].map((n) => `<figure class="option">
+      <a href="/cards/${c.id}/files/option-${n}.html" target="_blank"><img src="/cards/${c.id}/files/option-${n}.png" alt="Option ${n}"></a>
+      <figcaption>${escape(name(n))}</figcaption>
+      <form method="post" action="/cards/${c.id}/accept"><input type="hidden" name="choice" value="${n}"><button type="submit">Pick option ${n}</button></form>
+    </figure>`).join("\n    ");
+  return `<article class="feature" data-card="${c.id}" data-state="waiting">${head}
+  <p class="after">${escape(c.card.after)}</p>
+  <div class="options">
+    ${options}
+  </div>
+  <div class="verdict">${rejectForm(c)}</div>
+</article>`;
+}
+
+/** A finished report, readable on the page, with Accept and Reject. */
+function reportNote(c: CardRow, head: string): string {
+  return `<article class="feature" data-card="${c.id}" data-state="waiting">${head}
+  <p class="after">${escape(c.card.after)}</p>
+  <p><a class="read" href="/cards/${c.id}/report">Read the report</a></p>
+  <div class="verdict">
+    <form method="post" action="/cards/${c.id}/accept"><button type="submit">Accept</button></form>
+    ${rejectForm(c)}
+  </div>
+</article>`;
 }
 
 /** Each job in the owner's words, in the order the work happens. */
@@ -175,7 +237,9 @@ ${lines.join("\n")}
 
 function page(store: Store, error: string | null, chat: Chat | null = null): string {
   const all = cards(store);
-  const drafts = all.filter((c) => c.state === "draft").map(draftNote).join("\n");
+  // A plan's cards are shown inside the plan, not one by one.
+  const drafts = all.filter((c) => c.state === "draft" && !(c.parent && store.getCard(c.parent).state === "draft"))
+    .map((c) => draftNote(c, store)).join("\n");
   // What needs the owner comes first: a verdict, then work still under way; finished features go under Done.
   const open = all.filter((c) => WHERE[c.state] && c.state !== "accepted" && c.state !== "rejected");
   const ordered = [...open.filter((c) => c.state === "waiting"), ...open.filter((c) => c.state !== "waiting")];
@@ -189,6 +253,8 @@ function page(store: Store, error: string | null, chat: Chat | null = null): str
       return `<article class="feature" data-card="${c.id}" data-state="${c.state}">${head}${why}</article>`;
     }
     if (c.state !== "waiting") return `<article class="feature" data-card="${c.id}" data-state="${c.state}">${head}</article>`;
+    if (c.card.kind === "choice") return choiceNote(c, head, store);
+    if (c.card.kind === "report") return reportNote(c, head);
     const video = recording(store, c.id)
       ? `<video controls preload="metadata" src="/cards/${c.id}/video.webm" aria-label="Recording of ${escape(c.card.title)}"></video>`
       : `<p class="missing">No recording was kept for this feature.</p>`;
@@ -269,6 +335,8 @@ export function serve(store: Store, port: number, modelsFile?: string, intake: I
       const html = (status: number, body: string) =>
         res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).end(body);
       const video = /^\/cards\/([0-9a-f-]{36})\/video\.webm$/.exec(url.pathname);
+      const files = /^\/cards\/([0-9a-f-]{36})\/files\/([\w.-]+)$/.exec(url.pathname);
+      const report = /^\/cards\/([0-9a-f-]{36})\/report$/.exec(url.pathname);
       const verdict = /^\/cards\/([0-9a-f-]{36})\/(accept|reject|approve)$/.exec(url.pathname);
       const answer = /^\/intake\/([0-9a-f-]{36})$/.exec(url.pathname);
       const job = new RegExp(`^/models/(${JOBS.map(([r]) => r).join("|")})$`).exec(url.pathname);
@@ -281,7 +349,7 @@ export function serve(store: Store, port: number, modelsFile?: string, intake: I
           if (!sentence) throw new Error("Describe the feature in one sentence first.");
           const project = chosenProject(store, form.get("project"));
           chat = { id: randomUUID(), sentence, project, questions: await intake.ask(sentence, project), answers: [], drafting: false };
-          if (!chat.questions.length) store.draft(project, await intake.draft(sentence, project, []));
+          if (!chat.questions.length) storeDraft(store, project, await intake.draft(sentence, project, []));
         } catch (error) {
           html(409, page(store, (error as Error).message));
           return;
@@ -315,7 +383,7 @@ export function serve(store: Store, port: number, modelsFile?: string, intake: I
         chat!.drafting = true;
         try {
           const answered = answers.map((a, i) => ({ question: chat!.questions[i].question, answer: a }));
-          store.draft(chat!.project, await intake.draft(chat!.sentence, chat!.project, answered));
+          storeDraft(store, chat!.project, await intake.draft(chat!.sentence, chat!.project, answered));
           chats.delete(chat!.id);
         } catch (error) {
           chat!.drafting = false;
@@ -340,6 +408,23 @@ export function serve(store: Store, port: number, modelsFile?: string, intake: I
       }
       else if (req.method === "GET" && url.pathname === "/style.css") {
         res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" }).end(readFileSync(join(WEB, "style.css")));
+      } else if (req.method === "GET" && (files || report)) {
+        const id = (files ?? report)![1];
+        const dir = artifactDir(store, id);
+        const name = files ? files[2] : "report.md";
+        const path = dir ? join(dir, name) : "";
+        if (!dir || !existsSync(path) || !resolve(path).startsWith(resolve(dir) + "/")) res.writeHead(404).end();
+        else if (report) {
+          const row = store.getCard(id);
+          html(200, `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escape(row.card.title)}</title>
+<link rel="stylesheet" href="/style.css"></head><body><main class="report"><p><a href="/">← Peeraxis</a></p>
+<h1>${escape(row.card.title)}</h1>
+${markdown(readFileSync(path, "utf8"), `/cards/${id}/files/`)}
+</main></body></html>`);
+        } else {
+          const type = { ".png": "image/png", ".html": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8", ".json": "application/json", ".webm": "video/webm" }[extname(path)] ?? "application/octet-stream";
+          res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store" }).end(readFileSync(path));
+        }
       } else if (req.method === "GET" && video) {
         const file = recording(store, video[1]);
         if (file) sendVideo(req, res, file);
@@ -347,7 +432,10 @@ export function serve(store: Store, port: number, modelsFile?: string, intake: I
       } else if (req.method === "POST" && verdict) {
         try {
           if (verdict[2] === "approve") approveDraft(store, verdict[1]);
-          else if (verdict[2] === "accept") await accept(store, verdict[1]);
+          else if (verdict[2] === "accept") {
+            const choice = Number(new URLSearchParams(await body(req)).get("choice") ?? "") || undefined;
+            await accept(store, verdict[1], choice);
+          }
           else await reject(store, verdict[1], new URLSearchParams(await body(req)).get("reason") ?? "");
         } catch (error) {
           html(409, page(store, (error as Error).message));
