@@ -117,6 +117,7 @@ if (command === "run") await run();
 else if (command === "add" && args.length === 2) add(args[0], args[1]);
 else if (command === "status") status();
 else if (command === "accept" && args.length === 1) await accept(open(), find(args[0]));
+else if (command === "pick" && args.length >= 2) await accept(open(), find(args[0]), args[1].split(",").map(Number), args.slice(2).join(" "));
 else if (command === "reject" && args.length >= 2) await reject(open(), find(args[0]), args.slice(1).join(" "));
 else if (command === "retry" && args.length >= 2) open().move(find(args[0]), "approved", { reason: args.slice(1).join(" ") });
 else if (command === "serve") serve(open(), Number(process.env.PEERAXIS_PORT ?? 4477), join(DATA, "models.json"));
@@ -124,6 +125,6 @@ else if (command === "drop" && args.length >= 2) open().move(find(args[0]), "rej
 else if (command === "install") install();
 else if (command === "digest") console.log(dailyDigest(open()) ?? "Nothing new to send today.");
 else {
-  console.error("usage: main.ts run | add <project> <card.json> | serve | digest | status | accept <id> | reject <id> <reason> | retry <id> <reason> | drop <id> <reason> | install");
+  console.error("usage: main.ts run | add <project> <card.json> | serve | digest | status | accept <id> | pick <id> <n[,n]> [note] | reject <id> <reason> | retry <id> <reason> | drop <id> <reason> | install");
   process.exit(2);
 }

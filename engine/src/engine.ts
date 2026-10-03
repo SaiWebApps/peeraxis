@@ -208,14 +208,16 @@ export class Engine {
         if (!setup.ok) throw new Park("Setting up the project failed, so nothing was built.", lastLine(setup.tail));
         const direction = chosenDirection(this, row);
         if (direction) {
-          // The look the owner picked earlier in this plan, as a reference inside the copy (never committed).
+          // The look(s) the owner picked earlier in this plan, as references inside the copy (never committed).
           mkdirSync(join(copy, ".peeraxis-direction"), { recursive: true });
-          copyFileSync(direction.html, join(copy, ".peeraxis-direction", "chosen.html"));
-          if (existsSync(direction.png)) copyFileSync(direction.png, join(copy, ".peeraxis-direction", "chosen.png"));
+          direction.picks.forEach((pick, i) => {
+            copyFileSync(pick.html, join(copy, ".peeraxis-direction", `chosen-${i + 1}.html`));
+            if (existsSync(pick.png)) copyFileSync(pick.png, join(copy, ".peeraxis-direction", `chosen-${i + 1}.png`));
+          });
           execFileSync("/bin/sh", ["-c", 'printf "/.peeraxis-direction/\\n" >> .git/info/exclude'], { cwd: copy });
         }
         const lookNote = direction
-          ? `The owner picked this look for the product: "${direction.name}". Match it; the reference page is .peeraxis-direction/chosen.html (screenshot: chosen.png).`
+          ? `${direction.summary} Match it. Reference pages are in .peeraxis-direction/ (chosen-1.html${direction.picks.length > 1 ? ", chosen-2.html" : ""}, with .png screenshots).`
           : undefined;
         const built = await this.ask(row.id, "builder", builder, {
           cwd: copy, write: true, minutes: plugin.minutes.build,
@@ -345,13 +347,16 @@ export class Engine {
     for (;;) {
       const reviewer = this.choose(row.id, "lookReviewer", builderFamily);
       const direction = chosenDirection(this, row);
-      const reference = direction && existsSync(direction.png) ? join(dir, "chosen-look.png") : null;
-      if (reference) copyFileSync(direction!.png, reference);
-      const prompt = jobs.lookPrompt(row.card, steps.length > 0) + (reference
-        ? `\n\nThe owner picked the look "${direction!.name}"; chosen-look.png shows it. The feature should clearly follow it.`
+      const references = (direction?.picks ?? []).filter((p) => existsSync(p.png)).map((p, i) => {
+        const to = join(dir, `chosen-look-${i + 1}.png`);
+        copyFileSync(p.png, to);
+        return to;
+      });
+      const prompt = jobs.lookPrompt(row.card, steps.length > 0) + (direction
+        ? `\n\n${direction.summary} The chosen-look-N.png screenshots show it. The feature should clearly follow it.`
         : "");
       const result = await this.ask(row.id, "lookReviewer", reviewer, {
-        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: reference ? [...shots, reference] : shots, prompt,
+        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: [...shots, ...references], prompt,
       });
       if (result.limitUntil) continue;
       const verdict = result.json as { verdict: string; findings: { blocking: boolean; text: string }[] } | undefined;

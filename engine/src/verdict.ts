@@ -25,12 +25,13 @@ function finishPlan(store: Store, id: string): void {
  * Moves main forward to one waiting feature. Verdicts go oldest first, one feature at a time.
  * A report or a choice has nothing to land: accepting records it (and, for a choice, the option picked).
  */
-export async function accept(store: Store, id: string, choice?: number): Promise<void> {
+export async function accept(store: Store, id: string, choice?: number | number[], note?: string): Promise<void> {
   const row = store.getCard(id);
   if (row.card.kind === "report" || row.card.kind === "choice") {
     if (row.state !== "waiting") throw new Error(`"${row.card.title}" is ${row.state}, not waiting for a verdict.`);
-    if (row.card.kind === "choice" && !(choice && choice >= 1 && choice <= 3)) throw new Error("Pick one of the three options.");
-    store.move(id, "accepted", row.card.kind === "choice" ? { choice } : {});
+    const picks = ([] as number[]).concat(choice ?? []);
+    if (row.card.kind === "choice" && (!picks.length || picks.some((n) => !(n >= 1 && n <= 3)))) throw new Error("Pick one of the three options.");
+    store.move(id, "accepted", row.card.kind === "choice" ? { choice: picks.length === 1 ? picks[0] : picks, ...(note?.trim() ? { note: note.trim() } : {}) } : {});
     finishPlan(store, id);
     return;
   }

@@ -340,7 +340,7 @@ test("a plan with a choice, a change and a report: the pick guides the change; n
         writeFileSync(join(out!, "report.md"), `# Summary\n\nIt went well.\n\n## What went well\n\n${"Real details. ".repeat(30)}`);
         return { ok: true, text: "report written" };
       }
-      sawDirection = existsSync(join(run.cwd, ".peeraxis-direction", "chosen.html")) && /picked this look for the product: "Calm"/.test(run.prompt);
+      sawDirection = existsSync(join(run.cwd, ".peeraxis-direction", "chosen-1.html")) && /picked this look: "Calm"/.test(run.prompt);
       return DEFAULT_SCRIPT.builder(run, call);
     },
   });
@@ -382,4 +382,28 @@ test("cards after a choice wait for the owner's pick while other work goes ahead
   assert.equal(s.store.next()?.id, other, "the card after the choice should wait for the pick");
   s.store.move(choice, "accepted", { choice: 1 });
   assert.equal(s.store.next()?.id, after);
+});
+
+test("a pick can combine two options with a note, and later cards get both looks and the note", async () => {
+  const { accept } = await import("../src/verdict.ts");
+  let prompt = "";
+  const s = setup({
+    builder: (run, call) => {
+      if (run.prompt.startsWith("Make 3")) {
+        const out = /Write (\S+)\/option-1\.html/.exec(run.prompt)![1];
+        for (const n of [1, 2, 3]) { writeFileSync(join(out, `option-${n}.html`), `<p>${n}</p>`); writeFileSync(join(out, `option-${n}.txt`), ["One", "Light", "Dark"][n - 1]); }
+        return { ok: true, text: "" };
+      }
+      prompt = run.prompt;
+      assert.ok(existsSync(join(run.cwd, ".peeraxis-direction", "chosen-2.html")));
+      return DEFAULT_SCRIPT.builder(run, call);
+    },
+  });
+  const plan = s.store.draftPlan(s.root, { title: "Look", before: "b", after: "a", cards: [{ ...CARD, title: "Pick", kind: "choice" }, { ...CARD, kind: "change" }] });
+  s.store.approvePlan(plan);
+  const [choice] = s.store.children(plan).map((c) => c.id);
+  await s.engine.step();
+  await accept(s.store, choice, [2, 3], "Light mode follows the first, dark mode the second.");
+  await s.engine.step();
+  assert.match(prompt, /"Light" and \(2\) "Dark"\. Light mode follows the first, dark mode the second\./);
 });

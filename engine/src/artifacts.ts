@@ -126,18 +126,32 @@ async function shootOptions(out: string): Promise<string | null> {
   return null;
 }
 
-/** The look the owner picked in an earlier choice card of the same plan, if any: its page and screenshot. */
-export function chosenDirection(engine: Engine, row: CardRow): { html: string; png: string; name: string } | null {
+/** One picked option: its page, screenshot and plain name. */
+export type Picked = { html: string; png: string; name: string };
+
+/**
+ * The look the owner picked in an earlier choice card of the same plan, if any: one or more options
+ * (e.g. one for light mode and one for dark) and the owner's note on how they combine.
+ */
+export function chosenDirection(engine: Engine, row: CardRow): { picks: Picked[]; note: string; summary: string } | null {
   if (!row.parent) return null;
   for (const sibling of engine.deps.store.children(row.parent)) {
     if (sibling.card.kind !== "choice" || sibling.state !== "accepted") continue;
-    const picked = [...engine.deps.store.events(sibling.id)].reverse().find((e) => e.kind === "card.accepted")?.data.choice;
-    if (!picked) continue;
+    const data = [...engine.deps.store.events(sibling.id)].reverse().find((e) => e.kind === "card.accepted")?.data;
+    const chosen = ([] as unknown[]).concat(data?.choice ?? []).map(Number).filter((n) => n >= 1 && n <= 3);
+    if (!chosen.length) continue;
     const dir = join(engine.deps.dataDir, "cards", sibling.id, "evidence", "choice");
-    const html = join(dir, `option-${picked}.html`);
-    if (!existsSync(html)) continue;
-    const name = existsSync(join(dir, `option-${picked}.txt`)) ? readFileSync(join(dir, `option-${picked}.txt`), "utf8").trim() : `Option ${picked}`;
-    return { html, png: join(dir, `option-${picked}.png`), name };
+    const picks = chosen.map((n) => ({
+      html: join(dir, `option-${n}.html`),
+      png: join(dir, `option-${n}.png`),
+      name: existsSync(join(dir, `option-${n}.txt`)) ? readFileSync(join(dir, `option-${n}.txt`), "utf8").trim() : `Option ${n}`,
+    })).filter((p) => existsSync(p.html));
+    if (!picks.length) continue;
+    const note = typeof data?.note === "string" ? data.note : "";
+    const summary = picks.length === 1
+      ? `The owner picked this look: "${picks[0].name}".`
+      : `The owner picked these looks: ${picks.map((p, i) => `(${i + 1}) "${p.name}"`).join(" and ")}.`;
+    return { picks, note, summary: note ? `${summary} ${note}` : summary };
   }
   return null;
 }
