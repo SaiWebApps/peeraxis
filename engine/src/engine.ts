@@ -25,7 +25,14 @@ export class Wait extends Error {
 }
 
 /** Thrown to park a card with the one sentence the owner will read. */
-class Park extends Error {}
+class Park extends Error {
+  /** Technical detail kept in the event log; the owner only ever sees the plain message. */
+  readonly detail: string | undefined;
+  constructor(message: string, detail?: string) {
+    super(message);
+    this.detail = detail;
+  }
+}
 
 const TRIES = 2;
 /** Writing a fair hidden test is harder than it looks; the author gets one more try (runs 0822c289, da199015). */
@@ -51,8 +58,9 @@ export class Engine {
       await this.buildAndCheck(row, plugin);
     } catch (error) {
       if (error instanceof Wait) throw error;
-      const sentence = error instanceof Park ? error.message : `The engine hit an unexpected error: ${(error as Error).message}`;
-      this.deps.store.move(row.id, "parked", { sentence });
+      const sentence = error instanceof Park ? error.message : "Peeraxis hit an unexpected error while working on this card.";
+      const detail = error instanceof Park ? error.detail : String((error as Error).stack ?? error);
+      this.deps.store.move(row.id, "parked", { sentence, detail });
     } finally {
       const leftovers = newLitter(before, litter(row.project));
       if (leftovers.length) this.deps.store.event(row.id, "project.leftovers", { leftovers });
@@ -141,7 +149,7 @@ export class Engine {
         removeCopy(copy);
       }
     }
-    throw new Park(`Peeraxis could not write a fair test for this card: ${feedback.at(-1)}`);
+    throw new Park(`Peeraxis couldn't write a fair hidden test for this card in ${TEST_TRIES} tries.`, feedback.at(-1));
   }
 
   private hiddenTest(row: CardRow): { source: string; testFile: string; author: string } {
@@ -190,7 +198,7 @@ export class Engine {
       const copy = makeCopy(row.project, base, plugin.copyIn);
       try {
         const setup = await runStage({ command: plugin.setup, cwd: copy, timeoutMs: plugin.minutes.setup * 60_000 });
-        if (!setup.ok) throw new Park(`Setting up the project failed: ${lastLine(setup.tail)}`);
+        if (!setup.ok) throw new Park("Setting up the project failed, so nothing was built.", lastLine(setup.tail));
         const built = await this.ask(row.id, "builder", builder, {
           cwd: copy, write: true, minutes: plugin.minutes.build,
           prompt: jobs.builderPrompt(row.card, allowed, facts, plugin.notes),
@@ -204,7 +212,7 @@ export class Engine {
         this.deps.store.move(row.id, "checking", { attempt, candidate });
         const findings = await this.review(row, copy, base, test, builder.family);
         if (findings.length) {
-          if (reviewUsed) throw new Park(`The reviewer still found a problem after one fix: ${findings[0]}`);
+          if (reviewUsed) throw new Park("The reviewer still found a problem after one fix.", findings.join(" "));
           reviewUsed = true;
           facts.push(...findings.map((f) => `Reviewer: ${f}`));
           this.deps.store.move(row.id, "building", { reason: "review findings", findings });
@@ -245,7 +253,7 @@ export class Engine {
     try {
       const setup = await runStage({ command: plugin.setup, cwd: copy, timeoutMs: plugin.minutes.setup * 60_000 });
       const check = setup.ok ? await runStage({ command: plugin.check, cwd: copy, timeoutMs: plugin.minutes.check * 60_000 }) : setup;
-      if (!check.ok) throw new Park(`The project's own check fails before any change, so nothing was built: ${lastLine(check.tail)}`);
+      if (!check.ok) throw new Park("The project's own check fails before any change, so nothing was built.", lastLine(check.tail));
       const health = await measure(copy, plugin, [], check.seconds);
       this.deps.store.event(row.id, "baseline.passed", { seconds: check.seconds });
       return health;
@@ -339,7 +347,7 @@ export class Engine {
     });
     const answer = result.json as { decision: string; sentence: string; cards: Card[] } | undefined;
     if (!result.ok || !answer || answer.decision !== "split" || answer.cards.length < 2) {
-      throw new Park(answer?.sentence || `Two tries failed: ${lastLine(failures.at(-1) ?? "")}`);
+      throw new Park(answer?.sentence || "Two tries to build this failed.", failures.join("\n"));
     }
     for (const card of answer.cards.slice(0, 4)) {
       this.deps.store.approve(row.project, { ...card, allowedPaths: row.card.allowedPaths }, row.id);

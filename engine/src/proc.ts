@@ -66,7 +66,7 @@ export function runStage(stage: Stage): Promise<StageResult> {
   child.stderr.on("data", keep);
 
   const seen = new Set<number>();
-  const watch = setInterval(() => descendants(child.pid, seen), 250);
+  const watch = setInterval(() => descendants(child.pid, seen), 100);
   return new Promise((resolve) => {
     let timedOut = false;
     const timer = setTimeout(() => {

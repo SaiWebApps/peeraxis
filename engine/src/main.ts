@@ -120,9 +120,10 @@ else if (command === "accept" && args.length === 1) await accept(open(), find(ar
 else if (command === "reject" && args.length >= 2) await reject(open(), find(args[0]), args.slice(1).join(" "));
 else if (command === "retry" && args.length >= 2) open().move(find(args[0]), "approved", { reason: args.slice(1).join(" ") });
 else if (command === "serve") serve(open(), Number(process.env.PEERAXIS_PORT ?? 4477), join(DATA, "models.json"));
+else if (command === "drop" && args.length >= 2) open().move(find(args[0]), "rejected", { reason: args.slice(1).join(" ") });
 else if (command === "install") install();
 else if (command === "digest") console.log(dailyDigest(open()) ?? "Nothing new to send today.");
 else {
-  console.error("usage: main.ts run | add <project> <card.json> | serve | digest | status | accept <id> | reject <id> <reason> | retry <id> <reason> | install");
+  console.error("usage: main.ts run | add <project> <card.json> | serve | digest | status | accept <id> | reject <id> <reason> | retry <id> <reason> | drop <id> <reason> | install");
   process.exit(2);
 }

@@ -35,7 +35,7 @@ const NEXT: Record<CardState, CardState[]> = {
   waiting: ["accepted", "rejected"],
   accepted: [],
   rejected: [],
-  parked: ["approved"],
+  parked: ["approved", "rejected"], // rejected: dropped by the owner, e.g. replaced by a later card
   split: ["waiting", "parked"],
 };
 

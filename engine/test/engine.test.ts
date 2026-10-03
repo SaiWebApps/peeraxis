@@ -313,3 +313,12 @@ test("cards without a look brief skip the look review", async () => {
   await s.engine.step();
   assert.equal(s.store.getCard(id).state, "waiting");
 });
+
+test("a parked card's sentence is plain; the technical detail goes only to the event log", async () => {
+  const s = setup({ cardCheck: () => ({ ok: true, text: "", json: { matches: false, problems: ['The locator page.getByText("x") is page-wide.'] } }) });
+  const id = s.store.approve(s.root, CARD);
+  await s.engine.step();
+  const parked = s.store.events(id).find((e) => e.kind === "card.parked")!;
+  assert.equal(parked.data.sentence, "Peeraxis couldn't write a fair hidden test for this card in 3 tries.");
+  assert.match(String(parked.data.detail), /getByText/);
+});
