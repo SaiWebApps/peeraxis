@@ -50,6 +50,12 @@ function cards(store: Store): CardRow[] {
   return (store.db.prepare("SELECT id FROM cards ORDER BY created_at").all() as { id: string }[]).map((r) => store.getCard(r.id));
 }
 
+/** Accepted and rejected features, the most recently finished first. */
+function finished(store: Store): CardRow[] {
+  return (store.db.prepare("SELECT id FROM cards WHERE state IN ('accepted', 'rejected') ORDER BY updated_at DESC, created_at DESC").all() as { id: string }[])
+    .map((r) => store.getCard(r.id));
+}
+
 /** Where a feature is, as the owner reads it; drafts are not features yet. */
 const WHERE: Partial<Record<CardRow["state"], [label: string, tone: string]>> = {
   approved: ["Queued", "queued"],
@@ -170,7 +176,10 @@ ${lines.join("\n")}
 function page(store: Store, error: string | null, chat: Chat | null = null): string {
   const all = cards(store);
   const drafts = all.filter((c) => c.state === "draft").map(draftNote).join("\n");
-  const features = all.filter((c) => WHERE[c.state]).map((c) => {
+  // What needs the owner comes first: a verdict, then work still under way; finished features go under Done.
+  const open = all.filter((c) => WHERE[c.state] && c.state !== "accepted" && c.state !== "rejected");
+  const ordered = [...open.filter((c) => c.state === "waiting"), ...open.filter((c) => c.state !== "waiting")];
+  const feature = (c: CardRow) => {
     const [label, tone] = WHERE[c.state]!;
     const head = `<div class="row"><h2>${escape(c.card.title)}</h2> <span class="badge ${tone}">${label}</span></div>`;
     if (c.state === "rejected" || c.state === "parked") {
@@ -195,7 +204,9 @@ function page(store: Store, error: string | null, chat: Chat | null = null): str
     </div>
   </div>
 </article>`;
-  }).join("\n");
+  };
+  const features = ordered.map(feature).join("\n");
+  const done = finished(store).map(feature).join("\n");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Peeraxis</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -205,7 +216,8 @@ function page(store: Store, error: string | null, chat: Chat | null = null): str
 ${intakeBox(store, chat)}
 ${error ? `<p class="error" role="alert">${escape(error)}</p>` : ""}
 ${drafts ? `<section class="drafts" aria-labelledby="needs-yes"><h2 class="heading" id="needs-yes">Needs your yes</h2>\n${drafts}\n</section>` : ""}
-${features || `<p class="empty">There are no features yet.</p>`}
+${features || (done ? "" : `<p class="empty">There are no features yet.</p>`)}
+${done ? `<section class="done" aria-labelledby="done"><h2 class="heading" id="done">Done</h2>\n${done}\n</section>` : ""}
 </main></body></html>`;
 }
 
