@@ -195,11 +195,12 @@ export class Store {
     return null;
   }
 
-  /** A card in a plan waits while an earlier card is an unpicked choice or is stopped. */
+  /** A card in a plan waits while an earlier card is unfinished, stopped, or an unpicked choice. */
   private waitsForEarlier(row: CardRow): boolean {
     const { created_at } = this.db.prepare("SELECT created_at FROM cards WHERE id = ?").get(row.id) as { created_at: string };
     const earlier = this.db.prepare("SELECT card, state FROM cards WHERE parent = ? AND created_at < ?").all(row.parent, created_at) as { card: string; state: string }[];
-    return earlier.some((c) => (JSON.parse(c.card).kind === "choice" && c.state !== "accepted") || c.state === "parked");
+    // Plan cards run in order: each waits until every earlier one is finished (a choice: picked).
+    return earlier.some((c) => (JSON.parse(c.card).kind === "choice" ? c.state !== "accepted" : !["waiting", "accepted", "rejected"].includes(c.state)));
   }
 
 
