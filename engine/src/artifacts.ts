@@ -113,7 +113,7 @@ async function shootOptions(out: string): Promise<string | null> {
     for (const [i, file] of pages.entries()) {
       const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
       await page.goto(`file://${file}`, { waitUntil: "networkidle", timeout: 30_000 }).catch(() => page.goto(`file://${file}`));
-      await page.screenshot({ path: join(out, `option-${i + 1}.png`), fullPage: false });
+      await page.screenshot({ path: join(out, `option-${i + 1}.png`), fullPage: true });
       await page.close();
     }
   } finally {
