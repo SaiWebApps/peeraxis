@@ -7,7 +7,7 @@
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { CardRow, Store } from "./db.ts";
 import { defaultIntake, type Intake, type Question } from "./intake.ts";
 import { DEFAULT_MODELS, KNOWN_MODELS, loadModels, saveModels, withModel, type ModelsConfig, type Role } from "./models.ts";
@@ -67,6 +67,7 @@ const WHERE: Partial<Record<CardRow["state"], [label: string, tone: string]>> = 
 function draftNote(c: CardRow): string {
   const steps = c.card.watch.map((s) => `<li>${escape(s)}</li>`).join("");
   return `<article class="feature draft" data-card="${c.id}" data-state="draft"><h2>${escape(c.card.title)}</h2>
+  <p class="project">${escape(basename(c.project))}</p>
   <p class="line"><span>Before:</span> ${escape(c.card.before)}</p>
   <p class="line"><span>After:</span> ${escape(c.card.after)}</p>
   <ol class="steps">${steps}</ol>
@@ -125,10 +126,26 @@ function currentProject(store: Store): string {
   return row.project;
 }
 
+/** Every project Peeraxis knows, by path. */
+function projects(store: Store): string[] {
+  return (store.db.prepare("SELECT DISTINCT project FROM cards ORDER BY project").all() as { project: string }[]).map((r) => r.project);
+}
+
+/** The project the owner picked, or the most recent one when none was picked. */
+function chosenProject(store: Store, picked: string | null): string {
+  if (!picked) return currentProject(store);
+  if (!projects(store).includes(picked)) throw new Error("Pick one of the projects Peeraxis knows.");
+  return picked;
+}
+
 /** The box at the top, or the chat while a feature is being described. */
-function intakeBox(chat: Chat | null): string {
+function intakeBox(store: Store, chat: Chat | null): string {
   if (!chat) {
+    const all = projects(store);
+    const current = all.length ? currentProject(store) : "";
+    const options = all.map((p) => `<option value="${escape(p)}"${p === current ? " selected" : ""}>${escape(basename(p))}</option>`).join("");
     return `<form class="intake" method="post" action="/intake">
+  <select name="project" aria-label="Project">${options}</select>
   <input type="text" name="sentence" required maxlength="300" placeholder="Describe a new feature in one sentence" aria-label="New feature">
   <button type="submit">Send</button>
 </form>`;
@@ -185,7 +202,7 @@ function page(store: Store, error: string | null, chat: Chat | null = null): str
 <link rel="stylesheet" href="/style.css"></head>
 <body><main>
 <div class="row top"><h1>Peeraxis</h1> <a href="/models">Models</a></div>
-${intakeBox(chat)}
+${intakeBox(store, chat)}
 ${error ? `<p class="error" role="alert">${escape(error)}</p>` : ""}
 ${drafts ? `<section class="drafts" aria-labelledby="needs-yes"><h2 class="heading" id="needs-yes">Needs your yes</h2>\n${drafts}\n</section>` : ""}
 ${features || `<p class="empty">There are no features yet.</p>`}
@@ -245,11 +262,12 @@ export function serve(store: Store, port: number, modelsFile?: string, intake: I
       const job = new RegExp(`^/models/(${JOBS.map(([r]) => r).join("|")})$`).exec(url.pathname);
       if (req.method === "GET" && url.pathname === "/") html(200, page(store, null, chats.get(url.searchParams.get("intake") ?? "") ?? null));
       else if (req.method === "POST" && url.pathname === "/intake") {
-        const sentence = (new URLSearchParams(await body(req)).get("sentence") ?? "").trim();
+        const form = new URLSearchParams(await body(req));
+        const sentence = (form.get("sentence") ?? "").trim();
         let chat: Chat;
         try {
           if (!sentence) throw new Error("Describe the feature in one sentence first.");
-          const project = currentProject(store);
+          const project = chosenProject(store, form.get("project"));
           chat = { id: randomUUID(), sentence, project, questions: await intake.ask(sentence, project), answers: [], drafting: false };
           if (!chat.questions.length) store.draft(project, await intake.draft(sentence, project, []));
         } catch (error) {

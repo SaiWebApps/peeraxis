@@ -179,6 +179,29 @@ test("one typed sentence asks the scripted question and drafts the card under Ne
   assert.equal((store.db.prepare("SELECT count(*) AS n FROM cards WHERE state = 'draft'").get() as { n: number }).n, 2);
 });
 
+test("a new feature goes to the project picked next to the box, and its draft shows that project", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "pxhome-"));
+  const seeded = JSON.parse(execFileSync(process.execPath, [join(import.meta.dirname, "seed.ts")], { env: { ...process.env, PEERAXIS_HOME: home }, encoding: "utf8" }));
+  const store = new Store(join(home, "peeraxis.sqlite"));
+  const port = await freePort();
+  const server = serve(store, port, undefined, scriptedIntake(join(import.meta.dirname, "fixtures/intake.json")));
+  t.after(() => server.close());
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${port}`;
+
+  const home_ = await (await fetch(`${base}/`)).text();
+  assert.match(home_, />sample-project<\/option>/);
+  assert.match(home_, />second-project<\/option>/);
+  const unknown = await fetch(`${base}/intake`, { method: "POST", headers: { Origin: base }, body: new URLSearchParams({ sentence: "Pin it", project: "/elsewhere" }), redirect: "manual" });
+  assert.equal(unknown.status, 409);
+  const sent = await fetch(`${base}/intake`, { method: "POST", headers: { Origin: base }, body: new URLSearchParams({ sentence: "Pin it", project: seeded.second }), redirect: "manual" });
+  const action = `/intake/${new URL(sent.headers.get("location")!, base).searchParams.get("intake")}`;
+  await fetch(`${base}${action}`, { method: "POST", headers: { Origin: base }, body: new URLSearchParams({ index: "0", answer: "No, unpin it when accepted" }), redirect: "manual" });
+  const row = store.db.prepare("SELECT project FROM cards WHERE state = 'draft' ORDER BY created_at DESC LIMIT 1").get() as { project: string };
+  assert.equal(row.project, seeded.second);
+  assert.match(await (await fetch(`${base}/`)).text(), /<h2>Pin a feature to the top<\/h2>\n  <p class="project">second-project<\/p>/);
+});
+
 test("an answer from a stale tab never answers a later question, and a failed draft can be retried", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "pxhome-"));
   execFileSync(process.execPath, [join(import.meta.dirname, "seed.ts")], { env: { ...process.env, PEERAXIS_HOME: home }, encoding: "utf8" });

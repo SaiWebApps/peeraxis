@@ -17,6 +17,7 @@ h1 { font-size: 22px; margin: 0 0 16px; }
 .reject button { flex: none; font: inherit; font-size: 14px; padding: 6px 10px; border: 1px solid #d2d2d7; border-radius: 6px; background: #fff; color: #b3261e; cursor: pointer; }
 .reject button:hover { background: #fdecea; }
 .draft h2 { font-size: 18px; }
+.draft .project { margin: 2px 0 0; font-size: 13px; color: #6e6e73; }
 .draft .line { margin: 6px 0 0; color: #424245; }
 .draft .line span { color: #6e6e73; }
 .steps { margin: 8px 0 12px; padding-left: 22px; color: #424245; }
@@ -48,6 +49,7 @@ a:hover { text-decoration: underline; }
 .models .refused { margin: 4px 0 0; color: #b3261e; font-family: -apple-system, system-ui, sans-serif; }
 .intake { display: flex; gap: 8px; margin: 0 0 16px; }
 .intake input { flex: 1; min-width: 0; font: inherit; padding: 10px 14px; border: 1px solid #d2d2d7; border-radius: 10px; background: #fff; }
+.intake select { flex: none; max-width: 180px; font: inherit; font-size: 14px; padding: 0 8px; border: 1px solid #d2d2d7; border-radius: 10px; background: #fff; color: #424245; }
 .intake button { flex: none; font: inherit; font-weight: 600; padding: 10px 20px; border: 0; border-radius: 10px; background: #0071e3; color: #fff; cursor: pointer; }
 .chat { display: flex; flex-direction: column; gap: 8px; max-width: 720px; margin: 0 0 16px; }
 .say { margin: 0; max-width: 80%; padding: 8px 14px; border-radius: 16px; }
