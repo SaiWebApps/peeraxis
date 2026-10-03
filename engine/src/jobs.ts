@@ -31,8 +31,9 @@ export function testAuthorPrompt(card: Card, testFile: string, example: string |
     "- Do not test anything listed under Not included.",
     "- Check the exact words the card or the project's known data give. Never match free text with a",
     "  regular expression or a guess at its shape.",
-    "- Find things the way a person would: by role and visible name (a button called Reject, a heading,",
-    "  a label's text). Never depend on page structure such as ancestors, CSS classes or element order.",
+    "- Find things only the way a person would: by role and exact visible name (a button called Reject, a",
+    "  heading, a label's text). Never by position, distance, size, element order, ancestors or CSS classes.",
+    "  Where the card does not name a label, choose a plain one; the builder will be told your names.",
     "- Any implementation a reasonable person would accept from this card must pass the test.",
     "- If the test drives a screen, save a screenshot at the end of every watched step, named step-1.png,",
     "  step-2.png, ... in the test's output folder (Playwright: page.screenshot({ path: test.info().outputPath('step-1.png') })).",
@@ -43,7 +44,8 @@ export function testAuthorPrompt(card: Card, testFile: string, example: string |
     ...FAIR_TEST_RULES,
     ...(feedback.length ? ["", "Earlier versions of your test were rejected for these reasons; avoid all of them:", ...feedback.map((f) => `- ${f}`)] : []),
     "",
-    "When done, reply with one sentence saying what the test checks.",
+    "When done, answer with a one-sentence summary of what the test checks, and every exact visible name",
+    "the test relies on (button names, headings, labels, texts), so the builder can use exactly those words.",
   ].join("\n");
 }
 
@@ -54,6 +56,16 @@ export const FAIR_TEST_RULES = [
   "- it checks nothing the card does not promise, and nothing under Not included;",
   "- a correct implementation of the card could pass it, however it is reasonably built, and an empty one could not.",
 ];
+
+export const TEST_NAMES_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "names"],
+  properties: {
+    summary: { type: "string" },
+    names: { type: "array", items: { type: "string" } },
+  },
+};
 
 export const CARD_CHECK_SCHEMA = {
   type: "object",
@@ -80,7 +92,7 @@ export function cardCheckPrompt(card: Card, testSource: string): string {
   ].join("\n");
 }
 
-export function builderPrompt(card: Card, allowed: string[], facts: string[], notes?: string): string {
+export function builderPrompt(card: Card, allowed: string[], facts: string[], notes?: string, names: string[] = []): string {
   return [
     "Build this feature in the current project.",
     "",
@@ -91,6 +103,7 @@ export function builderPrompt(card: Card, allowed: string[], facts: string[], no
     "project's full check (types, lint, tests, build) must pass. Keep changes small and in the style",
     "of the surrounding code. Do not add dependencies unless the card needs them. Do not commit.",
     ...(notes ? ["", "How the acceptance test will run:", notes] : []),
+    ...(names.length ? ["", "The acceptance test finds things on screen by these exact visible names; use them exactly:", ...names.map((n) => `- "${n}"`)] : []),
     ...(facts.length ? ["", "What went wrong last time (fix these):", ...facts.map((f) => `- ${f}`)] : []),
     "",
     "When done, reply with at most three plain sentences about what you changed.",

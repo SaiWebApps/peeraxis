@@ -407,3 +407,27 @@ test("a pick can combine two options with a note, and later cards get both looks
   await s.engine.step();
   assert.match(prompt, /"Light" and \(2\) "Dark"\. Light mode follows the first, dark mode the second\./);
 });
+
+test("the builder is told the exact visible names the hidden test relies on, never the test itself", async () => {
+  let prompt = "";
+  const s = setup({
+    testAuthor: (run, call) => ({ ...(DEFAULT_SCRIPT.testAuthor(run, call) as object), json: { summary: "checks", names: ["Run AI vs AI", "Hidden numbers"] } }) as never,
+    builder: (run, call) => { prompt = run.prompt; return DEFAULT_SCRIPT.builder(run, call); },
+  });
+  s.store.approve(s.root, CARD);
+  await s.engine.step();
+  assert.match(prompt, /use them exactly:\n- "Run AI vs AI"\n- "Hidden numbers"/);
+  assert.doesNotMatch(prompt, /node:test/);
+});
+
+test("a stopped card holds back the later cards of its plan; the plan stays open", async () => {
+  const s = setup({ builder: () => ({ ok: true, text: "did nothing" }), splitter: () => ({ ok: true, text: "", json: { decision: "park", sentence: "Stuck.", cards: [] } }) });
+  const plan = s.store.draftPlan(s.root, { title: "P", before: "b", after: "a", cards: [{ ...CARD, title: "First" }, { ...CARD, title: "Second" }] });
+  s.store.approvePlan(plan);
+  const [first, second] = s.store.children(plan).map((c) => c.id);
+  await s.engine.step();
+  assert.equal(s.store.getCard(first).state, "parked");
+  assert.equal(s.store.getCard(plan).state, "split");
+  assert.equal(s.store.next(), null, "the second card should wait for the stopped first one");
+  assert.equal(s.store.getCard(second).state, "approved");
+});

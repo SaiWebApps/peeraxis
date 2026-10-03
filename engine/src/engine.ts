@@ -126,9 +126,10 @@ export class Engine {
       const copy = makeCopy(row.project, sha, plugin.copyIn);
       try {
         const result = await this.ask(row.id, "testAuthor", author, {
-          cwd: copy, write: true, minutes: 20,
+          cwd: copy, write: true, minutes: 20, schema: jobs.TEST_NAMES_SCHEMA,
           prompt: jobs.testAuthorPrompt(row.card, testFile, plugin.testExample, feedback, plugin.notes),
         });
+        const names = ((result.json as { names?: string[] } | undefined)?.names ?? []).filter((n) => typeof n === "string" && n.trim()).slice(0, 30);
         if (result.limitUntil) { attempt--; continue; }
         const changed = changedPaths(copy, sha);
         if (!result.ok || changed.length !== 1 || changed[0] !== testFile) {
@@ -149,7 +150,7 @@ export class Engine {
         if (!verdict.matches) { feedback.push(verdict.problems.join(" ")); continue; }
         const store = this.cardDir(row.id, "test");
         writeFileSync(join(store, "test.src"), source);
-        this.deps.store.event(row.id, "test.ready", { testFile, author: author.id, hash: sha256(source) });
+        this.deps.store.event(row.id, "test.ready", { testFile, author: author.id, hash: sha256(source), names });
         this.deps.store.move(row.id, "building");
         return;
       } finally {
@@ -159,12 +160,12 @@ export class Engine {
     throw new Park(`Peeraxis couldn't write a fair hidden test for this card in ${TEST_TRIES} tries.`, feedback.at(-1));
   }
 
-  private hiddenTest(row: CardRow): { source: string; testFile: string; author: string } {
+  private hiddenTest(row: CardRow): { source: string; testFile: string; author: string; names: string[] } {
     const ready = [...this.deps.store.events(row.id)].reverse().find((e) => e.kind === "test.ready");
     if (!ready) throw new Error("no hidden test recorded");
     const source = readFileSync(join(this.cardDir(row.id, "test"), "test.src"), "utf8");
     if (sha256(source) !== ready.data.hash) throw new Park("The hidden test changed after it was written, so the card was stopped.");
-    return { source, testFile: String(ready.data.testFile), author: String(ready.data.author) };
+    return { source, testFile: String(ready.data.testFile), author: String(ready.data.author), names: (ready.data.names as string[] | undefined) ?? [] };
   }
 
   /** Runs the hidden test with recording on a fresh copy at `sha`. Keeps only report, video and screenshots. */
@@ -221,7 +222,7 @@ export class Engine {
           : undefined;
         const built = await this.ask(row.id, "builder", builder, {
           cwd: copy, write: true, minutes: plugin.minutes.build,
-          prompt: jobs.builderPrompt(row.card, allowed, facts, [plugin.notes, lookNote].filter(Boolean).join("\n\n") || undefined),
+          prompt: jobs.builderPrompt(row.card, allowed, facts, [plugin.notes, lookNote].filter(Boolean).join("\n\n") || undefined, test.names),
           canUseTool: jobs.builderPolicy(copy, allowed, [this.deps.dataDir]),
           plugins: pluginFolders(plugin.skills),
         });
@@ -390,6 +391,8 @@ export class Engine {
     const parentId = this.deps.store.getCard(row.id).parent;
     if (!parentId || this.state(parentId) !== "split") return;
     const children = this.deps.store.children(parentId);
+    // A plan stays open while a card is stopped; its later cards wait (see Store.next) until it is retried.
+    if (this.deps.store.getCard(parentId).card.kind === "plan") return;
     if (children.some((c) => c.state === "parked")) this.deps.store.move(parentId, "parked", { sentence: "A smaller part of this card could not be finished." });
     else if (children.every((c) => c.state === "waiting")) this.deps.store.move(parentId, "waiting", { children: children.map((c) => c.id) });
   }

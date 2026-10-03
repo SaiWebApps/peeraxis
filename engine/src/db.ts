@@ -41,7 +41,7 @@ const NEXT: Record<CardState, CardState[]> = {
   waiting: ["accepted", "rejected"],
   accepted: [],
   rejected: [],
-  parked: ["approved", "rejected"], // rejected: dropped by the owner, e.g. replaced by a later card
+  parked: ["approved", "rejected", "split"], // rejected: dropped by the owner, e.g. replaced by a later card
   split: ["waiting", "parked", "accepted"],
 };
 
@@ -189,16 +189,17 @@ export class Store {
       ORDER BY CASE state WHEN 'approved' THEN 1 ELSE 0 END, created_at`).all() as { id: string }[];
     for (const { id } of rows) {
       const row = this.getCard(id);
-      if (row.state === "approved" && row.parent && this.waitsForPick(row)) continue;
+      if (row.parent && this.waitsForEarlier(row)) continue;
       return row;
     }
     return null;
   }
 
-  private waitsForPick(row: CardRow): boolean {
+  /** A card in a plan waits while an earlier card is an unpicked choice or is stopped. */
+  private waitsForEarlier(row: CardRow): boolean {
     const { created_at } = this.db.prepare("SELECT created_at FROM cards WHERE id = ?").get(row.id) as { created_at: string };
     const earlier = this.db.prepare("SELECT card, state FROM cards WHERE parent = ? AND created_at < ?").all(row.parent, created_at) as { card: string; state: string }[];
-    return earlier.some((c) => JSON.parse(c.card).kind === "choice" && c.state !== "accepted");
+    return earlier.some((c) => (JSON.parse(c.card).kind === "choice" && c.state !== "accepted") || c.state === "parked");
   }
 
 
