@@ -68,6 +68,8 @@ export const DEFAULT_SCRIPT: Required<Script> = {
 };
 
 export function roleOf(prompt: string): keyof Script {
+  if (prompt.startsWith("Is this card about how screens LOOK") || prompt.startsWith("Check whether this tour test")) return "cardCheck";
+  if (prompt.startsWith("This card changes how screens look")) return "testAuthor";
   if (prompt.startsWith("Do this piece of work") || prompt.startsWith("Make 3 clearly different")) return "builder";
   if (prompt.startsWith("Review this report")) return "reviewer";
   if (prompt.startsWith("You write the acceptance test")) return "testAuthor";

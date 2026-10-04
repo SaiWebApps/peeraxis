@@ -119,9 +119,25 @@ export class Engine {
     return plugin.testFile.replace("{name}", `${slug}-${row.id.slice(0, 8)}`);
   }
 
+  /** Whether a card is a restyle, judged once by the card-check model and remembered. */
+  private async isVisual(row: CardRow): Promise<boolean> {
+    const known = [...this.deps.store.events(row.id)].reverse().find((e) => e.kind === "card.classified");
+    if (known) return known.data.visual === true;
+    if (!row.card.look) return false; // without a look brief there is nothing visual to judge
+    const model = this.choose(row.id, "cardCheck");
+    const result = await this.ask(row.id, "cardCheck", model, {
+      cwd: row.project, write: false, minutes: 5, schema: jobs.CLASSIFY_SCHEMA, prompt: jobs.classifyPrompt(row.card),
+    });
+    const answer = result.json as { visual: boolean; reason: string } | undefined;
+    const visual = result.ok && answer?.visual === true;
+    this.deps.store.event(row.id, "card.classified", { visual, reason: answer?.reason });
+    return visual;
+  }
+
   private async writeTest(row: CardRow, plugin: Plugin): Promise<void> {
     const testFile = this.testPath(row, plugin);
     const feedback: string[] = [];
+    const visual = await this.isVisual(row);
     for (let attempt = 1; attempt <= TEST_TRIES; attempt++) {
       const builderFamily = this.choose(row.id, "builder").family;
       const author = this.choose(row.id, "testAuthor", builderFamily);
@@ -130,7 +146,9 @@ export class Engine {
       try {
         const result = await this.ask(row.id, "testAuthor", author, {
           cwd: copy, write: true, minutes: 20, schema: jobs.TEST_NAMES_SCHEMA,
-          prompt: jobs.testAuthorPrompt(row.card, testFile, plugin.testExample, feedback, plugin.notes),
+          prompt: visual
+            ? jobs.tourPrompt(row.card, testFile, plugin.testExample, feedback, plugin.notes)
+            : jobs.testAuthorPrompt(row.card, testFile, plugin.testExample, feedback, plugin.notes),
         });
         const names = ((result.json as { names?: string[] } | undefined)?.names ?? []).filter((n) => typeof n === "string" && n.trim()).slice(0, 30);
         if (result.limitUntil) { attempt--; continue; }
@@ -143,17 +161,19 @@ export class Engine {
         const checker = this.choose(row.id, "cardCheck", author.family);
         const check = await this.ask(row.id, "cardCheck", checker, {
           cwd: copy, write: false, minutes: 10, schema: jobs.CARD_CHECK_SCHEMA,
-          prompt: jobs.cardCheckPrompt(row.card, source),
+          prompt: visual ? jobs.tourCheckPrompt(row.card, source) : jobs.cardCheckPrompt(row.card, source),
         });
         if (check.limitUntil) { attempt--; continue; }
         const verdict = check.json as { matches: boolean; problems: string[] } | undefined;
         if (!check.ok || !verdict) { feedback.push("The test could not be checked against the card."); continue; }
         if (!verdict.matches) { feedback.push(verdict.problems.join(" ")); continue; }
-        const red = await this.runAcceptance(row, plugin, row.project, sha, source, testFile, `red-${attempt}`);
-        if (red.ok) { feedback.push("The test passes on the current code, so it does not check the new feature."); continue; }
+        // A behaviour test must fail today; a restyle tour must pass today (its screenshots are the "before").
+        const red = await this.runAcceptance(row, plugin, row.project, sha, source, testFile, visual ? "before" : `red-${attempt}`);
+        if (!visual && red.ok) { feedback.push("The test passes on the current code, so it does not check the new feature."); continue; }
+        if (visual && !red.ok) { feedback.push(`The tour fails on today's screens, but it must pass before the restyle too:\n${red.tail.split("\n").slice(-12).join("\n")}`); continue; }
         const store = this.cardDir(row.id, "test");
         writeFileSync(join(store, "test.src"), source);
-        this.deps.store.event(row.id, "test.ready", { testFile, author: author.id, hash: sha256(source), names });
+        this.deps.store.event(row.id, "test.ready", { testFile, author: author.id, hash: sha256(source), names, visual });
         this.deps.store.move(row.id, "building");
         return;
       } finally {
@@ -202,7 +222,9 @@ export class Engine {
     const allowed = row.card.allowedPaths ?? plugin.allowedPaths;
     const facts: string[] = [];
     let reviewUsed = false;
-    let lookUsed = false;
+    let lookFixes = 0;
+    const visualCard = [...this.deps.store.events(row.id)].reverse().find((e) => e.kind === "card.classified")?.data.visual === true;
+    const lookFixLimit = visualCard ? 2 : 1; // for a restyle, the look review is the real check
     const baseline = await this.baseline(row, plugin);
 
     for (let attempt = 1; attempt <= TRIES; attempt++) {
@@ -247,8 +269,8 @@ export class Engine {
           continue;
         }
         const look = await this.lookReview(row, attempt, builder.family);
-        if (look.length && !lookUsed) {
-          lookUsed = true;
+        if (look.length && lookFixes < lookFixLimit) {
+          lookFixes++;
           facts.push(...look.map((f) => `Look: ${f}`));
           this.deps.store.move(row.id, "building", { reason: "look findings", findings: look });
           attempt--; // a look fix is not a failed try
@@ -342,7 +364,7 @@ export class Engine {
     const pngs = (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith(".png"));
     // Prefer one screenshot per watched step (step-1.png, ...); the end-of-test shot alone misleads
     // a look review of anything the steps change (run e532f7bc judged a draft that was already approved).
-    const steps = pngs.filter((f) => /(^|\/)step-\d+\.png$/.test(f))
+    const steps = pngs.filter((f) => /(^|\/)step-\d+(-[a-z]+)?\.png$/.test(f))
       .sort((a, b) => Number(/step-(\d+)/.exec(a)![1]) - Number(/step-(\d+)/.exec(b)![1]));
     const shots = (steps.length ? steps : pngs).map((f) => join(dir, f))
       .sort((a, b) => (steps.length ? 0 : statSync(b).mtimeMs - statSync(a).mtimeMs)).slice(0, 8);
@@ -358,11 +380,22 @@ export class Engine {
         copyFileSync(p.png, to);
         return to;
       });
-      const prompt = jobs.lookPrompt(row.card, steps.length > 0) + (direction
+      // For a restyle, the tour's screenshots from before the change sit beside the new ones.
+      const beforeDir = join(this.deps.dataDir, "cards", row.id, "evidence", "before");
+      const befores = existsSync(beforeDir)
+        ? (readdirSync(beforeDir, { recursive: true }) as string[]).filter((f) => /step-\d+(-[a-z]+)?\.png$/.test(f)).slice(0, 4).map((f) => {
+            const to = join(dir, `before-${f.split("/").at(-1)}`);
+            copyFileSync(join(beforeDir, f), to);
+            return to;
+          })
+        : [];
+      const prompt = jobs.lookPrompt(row.card, steps.length > 0) + (befores.length
+        ? "\n\nThe before-*.png screenshots show the same screens before this change, for comparison."
+        : "") + (direction
         ? `\n\n${direction.summary} The chosen-look-N.png screenshots show it. The feature should clearly follow it.`
         : "");
       const result = await this.ask(row.id, "lookReviewer", reviewer, {
-        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: [...shots, ...references], prompt,
+        cwd: dir, write: false, minutes: 10, schema: jobs.REVIEW_SCHEMA, images: [...shots, ...befores, ...references].slice(0, 14), prompt,
       });
       if (result.limitUntil) continue;
       const verdict = result.json as { verdict: string; findings: { blocking: boolean; text: string }[] } | undefined;

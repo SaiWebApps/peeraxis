@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { CARD, DEFAULT_SCRIPT, setup } from "./fixture.ts";
 import { WAITING } from "../src/git.ts";
 import { Engine, Wait } from "../src/engine.ts";
@@ -430,4 +430,29 @@ test("a stopped card holds back the later cards of its plan; the plan stays open
   assert.equal(s.store.getCard(plan).state, "split");
   assert.equal(s.store.next(), null, "the second card should wait for the stopped first one");
   assert.equal(s.store.getCard(second).state, "approved");
+});
+
+test("a restyle card gets a tour that must pass before and after; the look review is its real check", async () => {
+  let checkPrompt = "";
+  const s = setup({
+    cardCheck: (run) => {
+      if (run.prompt.startsWith("Is this card about how screens LOOK")) return { ok: true, text: "", json: { visual: true, reason: "restyle" } };
+      checkPrompt = run.prompt;
+      return { ok: true, text: "", json: { matches: true, problems: [] } };
+    },
+    testAuthor: (run) => {
+      assert.match(run.prompt, /Write a tour test for it/);
+      const file = /Write exactly one test file at (\S+)\./.exec(run.prompt)![1];
+      mkdirSync(dirname(join(run.cwd, file)), { recursive: true });
+      writeFileSync(join(run.cwd, file), 'import { test } from "node:test";\ntest("tour", () => {});\n'); // passes before and after
+      return { ok: true, text: "", json: { summary: "tour", names: [] } };
+    },
+    lookReviewer: (_run, call) => ({ ok: true, text: "", json: call <= 2 ? { verdict: "fix", findings: [{ blocking: true, text: "Too cramped." }] } : { verdict: "pass", findings: [] } }),
+  });
+  const id = s.store.approve(s.root, { ...CARD, look: "Calm and roomy." });
+  await s.engine.step();
+  assert.match(checkPrompt, /tour test fits the restyle card/);
+  assert.equal(s.store.getCard(id).state, "waiting");
+  assert.equal(s.calls.filter((c) => c.role === "builder").length, 3, "two look fixes for a restyle");
+  assert.ok(existsSync(join(s.dataDir, "cards", id, "evidence", "before")));
 });

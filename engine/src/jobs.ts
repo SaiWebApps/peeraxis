@@ -281,3 +281,64 @@ export function choicePrompt(card: Card, out: string, notes: string | undefined)
     "When done, reply with the three one-line descriptions.",
   ].join("\n");
 }
+
+export const CLASSIFY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["visual", "reason"],
+  properties: { visual: { type: "boolean" }, reason: { type: "string" } },
+};
+
+export function classifyPrompt(card: Card): string {
+  return [
+    "Is this card about how screens LOOK (a restyle: layout, typeface, colours, spacing, phone fit) rather than",
+    "what they DO (new behaviour, new data, new controls)? Answer visual: true only if every watched step could",
+    "be judged from screenshots alone and today's screens already do what the steps describe, just not looking",
+    "the way the card wants. Give a one-sentence reason.",
+    "",
+    cardText(card),
+  ].join("\n");
+}
+
+/** A tour for a restyle card: visits each screen at laptop and phone size and saves screenshots. */
+export function tourPrompt(card: Card, testFile: string, example: string | undefined, feedback: string[], notes?: string): string {
+  return [
+    "This card changes how screens look, not what they do. Write a tour test for it. Another agent will restyle",
+    "the screens without seeing your test; the tour runs before and after, and a reviewer judges the screenshots.",
+    "",
+    cardText(card),
+    "",
+    `Write exactly one test file at ${testFile}. Create no other files and change nothing else.`,
+    "Rules:",
+    "- One test step per watched step, in order, titled with that step's words.",
+    "- In each step, open the screen(s) it names at a laptop size (1280x860) and then a phone size (390x844),",
+    "  check that the words and controls the step names are present and work, and save screenshots named",
+    "  step-<n>-laptop.png and step-<n>-phone.png in the test's output folder",
+    "  (Playwright: page.screenshot({ path: test.info().outputPath('step-1-laptop.png'), fullPage: true })).",
+    "- Never check appearance (fonts, colours, layout, sizes): the screenshots are judged separately.",
+    "- The tour must pass on today's code as well as after the restyle.",
+    "- Find things only by role and exact visible name, or exact visible text.",
+    ...(example ? [`- Follow the structure and helpers of the existing test ${example}.`] : []),
+    ...(notes ? ["", "How tests run in this project:", notes] : []),
+    ...(feedback.length ? ["", "Earlier versions were rejected for these reasons; avoid all of them:", ...feedback.map((f) => `- ${f}`)] : []),
+    "",
+    "When done, answer with a one-sentence summary and every exact visible name the tour relies on.",
+  ].join("\n");
+}
+
+export function tourCheckPrompt(card: Card, testSource: string): string {
+  return [
+    "Check whether this tour test fits the restyle card. It fits when: every watched step has a tour step, in",
+    "order, that opens the screens the step names at a laptop and a phone size and saves step-N-laptop.png and",
+    "step-N-phone.png; it checks only that named words and controls are present and work (never appearance);",
+    "and it would pass on today's screens as well as after any reasonable restyle.",
+    "List each concrete problem in one plain sentence. No style comments.",
+    "",
+    cardText(card),
+    "",
+    "Test:",
+    "```",
+    testSource,
+    "```",
+  ].join("\n");
+}
