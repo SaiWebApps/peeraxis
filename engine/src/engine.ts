@@ -161,7 +161,7 @@ export class Engine {
         const checker = this.choose(row.id, "cardCheck", author.family);
         const check = await this.ask(row.id, "cardCheck", checker, {
           cwd: copy, write: false, minutes: 10, schema: jobs.CARD_CHECK_SCHEMA,
-          prompt: visual ? jobs.tourCheckPrompt(row.card, source) : jobs.cardCheckPrompt(row.card, source),
+          prompt: visual ? jobs.tourCheckPrompt(row.card, source) : jobs.cardCheckPrompt(row.card, source, names),
         });
         if (check.limitUntil) { attempt--; continue; }
         const verdict = check.json as { matches: boolean; problems: string[] } | undefined;

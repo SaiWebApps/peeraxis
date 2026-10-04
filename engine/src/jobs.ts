@@ -80,10 +80,15 @@ export const CARD_CHECK_SCHEMA = {
   },
 };
 
-export function cardCheckPrompt(card: Card, testSource: string): string {
+export function cardCheckPrompt(card: Card, testSource: string, names: string[] = []): string {
   return [
     "Check whether this acceptance test matches the approved feature card. It matches when:",
     ...FAIR_TEST_RULES,
+    "The builder will be told every exact visible name the test relies on (listed below), so the test may",
+    "choose concrete names, labels, headings and texts the card leaves open, and use controls by role and name.",
+    "Flag only what a builder told those names still could not know or reasonably meet: markup structure,",
+    "positions, element order, styling, exact AI wording, or anything the card rules out.",
+    ...(names.length ? ["", "Names the builder will be told:", ...names.map((n) => `- "${n}"`)] : []),
     "List each concrete problem in one plain sentence. No style comments.",
     "",
     cardText(card),
