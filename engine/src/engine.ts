@@ -160,7 +160,7 @@ export class Engine {
         removeCopy(copy);
       }
     }
-    throw new Park(`Peeraxis couldn't write a fair hidden test for this card in ${TEST_TRIES} tries.`, feedback.at(-1));
+    throw new Park(`Peeraxis couldn't write a fair hidden test for this card in ${TEST_TRIES} tries.`, feedback.map((f, i) => `Try ${i + 1}: ${f}`).join("\n"));
   }
 
   private hiddenTest(row: CardRow): { source: string; testFile: string; author: string; names: string[] } {
@@ -173,7 +173,9 @@ export class Engine {
 
   /** Runs the hidden test with recording on a fresh copy at `sha`. Keeps only report, video and screenshots. */
   private async runAcceptance(row: CardRow, plugin: Plugin, repo: string, sha: string, source: string, testFile: string, label: string): Promise<StageResult> {
+    // Only the throwaway acceptance copy gets the live files (e.g. AI keys); builders never see them.
     const copy = makeCopy(repo, sha, plugin.copyIn);
+    for (const file of plugin.live?.copyIn ?? []) copyLive(row.project, copy, file);
     const out = this.cardDir(row.id, "evidence", label);
     try {
       const setup = await runStage({ command: plugin.setup, cwd: copy, timeoutMs: plugin.minutes.setup * 60_000 });
@@ -399,6 +401,15 @@ export class Engine {
     if (children.some((c) => c.state === "parked")) this.deps.store.move(parentId, "parked", { sentence: "A smaller part of this card could not be finished." });
     else if (children.every((c) => c.state === "waiting")) this.deps.store.move(parentId, "waiting", { children: children.map((c) => c.id) });
   }
+}
+
+/** Copies a live-only file (e.g. .env.local) from the project into an acceptance copy, if it exists. */
+function copyLive(root: string, copy: string, file: string): void {
+  const from = join(root, file);
+  if (!existsSync(from)) return;
+  mkdirSync(dirname(join(copy, file)), { recursive: true });
+  copyFileSync(from, join(copy, file));
+  execFileSync("/bin/sh", ["-c", `printf '%s\\n' "/${file}" >> .git/info/exclude`], { cwd: copy });
 }
 
 function sha256(text: string): string {
